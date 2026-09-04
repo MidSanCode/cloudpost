@@ -14,9 +14,31 @@ async function api(path, opts = {}) {
   if (!res.ok) {
     const msg = (data && data.error) || res.status + " " + res.statusText;
     if (res.status === 401) { renderLogin(); throw new Error(msg); }
+    if (res.status === 400 && msg === "not installed") { renderSetup(); throw new Error(msg); }
     throw new Error(msg);
   }
   return data;
+}
+
+function isNotInstalled(e) { return String((e && e.message) || "").includes("not installed"); }
+
+/* ---------------- boot ---------------- */
+async function boot() {
+  // cache-buster defeats any pre-no-store cached setup/status response
+  let st = null;
+  try { st = await api("/api/setup/status?_=" + Date.now()); } catch { /* ignore */ }
+  if (st && st.installed === false) return renderSetup();
+  try {
+    await api("/api/status");
+    return renderConsole("overview");
+  } catch (e) {
+    if (isNotInstalled(e)) return renderSetup();
+    try { await api("/api/mail/me"); return renderMailShell(); }
+    catch (e2) {
+      if (isNotInstalled(e2)) return renderSetup();
+      return renderLogin();
+    }
+  }
 }
 
 let toastTimer = null;
@@ -110,14 +132,20 @@ function renderDnsTable(tableId, domain, host, ip) {
 
 /* ---------------- boot ---------------- */
 async function boot() {
+  // cache-buster defeats any pre-no-store cached setup/status response
+  let st = null;
+  try { st = await api("/api/setup/status?_=" + Date.now()); } catch { /* ignore */ }
+  if (st && st.installed === false) return renderSetup();
   try {
-    const st = await api("/api/setup/status");
-    if (!st.installed) return renderSetup();
-  } catch (e) { return renderSetup(); }
-  try { await api("/api/status"); return renderConsole("overview"); }
-  catch {
+    await api("/api/status");
+    return renderConsole("overview");
+  } catch (e) {
+    if (isNotInstalled(e)) return renderSetup();
     try { await api("/api/mail/me"); return renderMailShell(); }
-    catch { return renderLogin(); }
+    catch (e2) {
+      if (isNotInstalled(e2)) return renderSetup();
+      return renderLogin();
+    }
   }
 }
 
@@ -224,7 +252,10 @@ function renderSetup() {
         await api("/api/setup", { method: "POST", body: data });
         toast("安装完成！请使用管理员密码登录");
         renderLogin(true);
-      } catch (e) { toast(e.message); }
+      } catch (e) {
+        if (String(e.message).includes("already installed")) { toast("服务器已完成安装，请直接登录"); renderLogin(); return; }
+        toast(e.message);
+      }
     };
   }
   render();
@@ -254,7 +285,7 @@ function renderLogin(afterSetup = false) {
       <button class="btn filled" id="l-go" style="width:100%">登 录</button>`;
       $("#l-go").onclick = async () => {
         try { await api("/api/login", { method: "POST", body: { password: $("#l-pw").value } }); renderConsole("overview"); }
-        catch (e) { toast(e.message); }
+        catch (e) { if (!isNotInstalled(e)) toast(e.message); } // not installed → api() already switched to the wizard
       };
     } else {
       body.innerHTML = `
@@ -272,6 +303,11 @@ function renderLogin(afterSetup = false) {
   $("#tab-mail").onclick = () => { mode = "mail"; $("#tab-mail").style.borderBottom = "2px solid var(--md-primary)"; $("#tab-admin").style.borderBottom = "none"; draw(); };
   $("#theme").onclick = themeToggle;
   draw();
+  // Self-heal: if the server is not installed (e.g. factory reset in another
+  // tab, or a stale cached boot decision), jump to the setup wizard.
+  api("/api/setup/status?_=" + Date.now()).then((st) => {
+    if (st && st.installed === false) renderSetup();
+  }).catch(() => { /* network hiccup; stay on login */ });
 }
 
 /* ---------------- console shell ---------------- */

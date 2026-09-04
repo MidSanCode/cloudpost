@@ -82,6 +82,8 @@ func (s *Server) routes() {
 	if staticDir != "" {
 		fs := http.FileServer(http.Dir(staticDir))
 		mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+			// Revalidate static assets so app.js updates are picked up.
+			w.Header().Set("Cache-Control", "no-cache")
 			p := filepath.Join(staticDir, filepath.Clean("/"+r.URL.Path))
 			if st, err := os.Stat(p); err != nil || st.IsDir() {
 				if r.URL.Path != "/" {
@@ -204,6 +206,9 @@ func (s *Server) mailAccount(r *http.Request) *mailstore.Account {
 // API router
 
 func (s *Server) handleAPI(w http.ResponseWriter, r *http.Request) {
+	// API responses must never be cached: setup/status flips between installs
+	// and factory resets, and a stale cached response bricks the UI.
+	w.Header().Set("Cache-Control", "no-store")
 	p := r.URL.Path
 	switch {
 	case p == "/api/setup/status":
