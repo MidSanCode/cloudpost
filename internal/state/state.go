@@ -14,18 +14,21 @@ type Config struct {
 	Installed     bool   `json:"installed"`
 	PrimaryDomain string `json:"primary_domain"`
 	Hostname      string `json:"hostname"`
-	AdminHash     string `json:"-"` // bcrypt hash, never serialized to clients
-	SMTPPort      int    `json:"smtp_port"`
-	SMTPSSLPort   int    `json:"smtp_ssl_port"`
-	POP3Port      int    `json:"pop3_port"`
-	POP3SSLPort   int    `json:"pop3_ssl_port"`
-	IMAPPort      int    `json:"imap_port"`
-	IMAPSSLPort   int    `json:"imap_ssl_port"`
-	WebPort       int    `json:"web_port"`
-	RelayHost     string `json:"relay_host"`
-	RelayPort     int    `json:"relay_port"`
-	RelayUser     string `json:"relay_user"`
-	RelayPass     string `json:"relay_pass"`
+	// AdminHash is the bcrypt hash of the admin password. It must persist in
+	// config.json so logins survive process restarts; API responses never
+	// serialize it (all client payloads are hand-built maps).
+	AdminHash   string `json:"admin_hash"`
+	SMTPPort    int    `json:"smtp_port"`
+	SMTPSSLPort int    `json:"smtp_ssl_port"`
+	POP3Port    int    `json:"pop3_port"`
+	POP3SSLPort int    `json:"pop3_ssl_port"`
+	IMAPPort    int    `json:"imap_port"`
+	IMAPSSLPort int    `json:"imap_ssl_port"`
+	WebPort     int    `json:"web_port"`
+	RelayHost   string `json:"relay_host"`
+	RelayPort   int    `json:"relay_port"`
+	RelayUser   string `json:"relay_user"`
+	RelayPass   string `json:"relay_pass"`
 }
 
 // State is the process-wide runtime state.
@@ -67,6 +70,12 @@ func (s *State) Load() {
 	}
 	cfg := &Config{}
 	if jsonUnmarshal(b, cfg) == nil {
+		// Self-heal legacy configs written before the admin hash was
+		// persisted: they claim installed but no login can ever succeed.
+		// Drop back to the setup wizard honestly instead of dead-locking.
+		if cfg.Installed && cfg.AdminHash == "" {
+			cfg.Installed = false
+		}
 		s.cfg = cfg
 	}
 }
