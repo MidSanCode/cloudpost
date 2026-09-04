@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Cloudpost · 邮件中心</title>
+<link rel="stylesheet" href="styles.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@6.7.2/css/all.min.css">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath fill='%236750A4' d='M20 4H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm0 4-8 5-8-5V6l8 5 8-5v2z'/%3E%3C/svg%3E">
+</head>
+<body>
+<div id="app"></div>
+
+<dialog id="dlg" class="m3-dialog">
+  <form method="dialog" id="dlg-form">
+    <h2 id="dlg-title"></h2>
+    <div id="dlg-body" class="dlg-body"></div>
+    <div class="dlg-actions">
+      <button type="button" class="btn text" id="dlg-cancel">取消</button>
+      <button type="submit" class="btn filled" id="dlg-ok">确定</button>
+    </div>
+  </form>
+</dialog>
+
+<div id="snackbar" class="snackbar"></div>
+
+<script src="app.js"></script>
+</body>
+</html>

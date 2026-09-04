@@ -1,0 +1,10 @@
+# dependencies live in .gomodcache (workspace-local, set via env)
+.gomodcache/
+.gocache/
+.gotmp/
+.rundata/
+.rundata-sess.xml
+cloudpost.exe
+cloudpost.exe~
+cloudpost-data/
+*.dshbundle.json
