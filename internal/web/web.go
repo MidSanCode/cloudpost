@@ -48,8 +48,8 @@ type Server struct {
 	webSwap   net.Listener // pending replacement listener after a port change
 
 	resetMu    sync.Mutex
-	resetToken string     // one-time factory-reset confirmation token
-	resetExp   time.Time  // token expiry
+	resetToken string    // one-time factory-reset confirmation token
+	resetExp   time.Time // token expiry
 }
 
 // TakeWebSwap returns and clears a pending replacement web listener set by a
