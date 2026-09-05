@@ -643,6 +643,25 @@ func (s *Store) GetMessageRaw(accountID, msgID int64) ([]byte, *Message, error) 
 	return raw, m, nil
 }
 
+// ListAttachments parses the stored raw message and returns attachment
+// metadata (no content).
+func (s *Store) ListAttachments(accountID, msgID int64) ([]*Attachment, error) {
+	raw, _, err := s.GetMessageRaw(accountID, msgID)
+	if err != nil {
+		return nil, err
+	}
+	return ParseHeaders(raw).Attachments, nil
+}
+
+// ExtractAttachment returns the decoded content of one attachment part.
+func (s *Store) ExtractAttachment(accountID, msgID int64, part int) ([]byte, string, string, error) {
+	raw, _, err := s.GetMessageRaw(accountID, msgID)
+	if err != nil {
+		return nil, "", "", err
+	}
+	return ExtractPart(raw, part)
+}
+
 // SetFlags sets/adds/removes IMAP flags on the given message ids of an account.
 func (s *Store) SetFlags(accountID int64, ids []int64, mode string, flags []string) error {
 	if len(ids) == 0 || len(flags) == 0 {

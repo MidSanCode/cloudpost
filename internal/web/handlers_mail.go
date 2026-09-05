@@ -1,7 +1,9 @@
 package web
 
 import (
+	"encoding/base64"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 
@@ -38,6 +40,10 @@ func (s *Server) handleMail(w http.ResponseWriter, r *http.Request) {
 			s.mailListMessages(w, r, acc, folderID)
 		case len(segs) == 2 && segs[1] == "messages" && m == http.MethodPost:
 			s.mailSearch(w, r, acc, folderID)
+		case len(segs) == 5 && segs[1] == "messages" && segs[3] == "attachments":
+			s.handleMailAttachment(w, r, acc, folderID, strings.Join(segs[2:], "/"))
+		case len(segs) == 5 && segs[1] == "messages" && segs[3] == "cid":
+			s.handleMailCID(w, r, acc, folderID, strings.Join(segs[2:], "/"))
 		case len(segs) == 3 && segs[1] == "messages":
 			s.mailMessage(w, r, acc, folderID, segs[2], m)
 		case len(segs) == 2 && segs[1] == "expunge" && m == http.MethodPost:
@@ -188,8 +194,109 @@ func (s *Server) mailMessage(w http.ResponseWriter, r *http.Request, acc *mailst
 	}
 	s.deps.Store.MarkSeen(acc.ID, id)
 	info := parseForView(raw)
-	resp := map[string]any{"message": msg, "text": info.TextBody, "html": info.HTMLBody}
+	resp := map[string]any{"message": msg, "text": info.TextBody}
+	// HTML mails are sanitized server-side and rendered in a sandboxed
+	// iframe with a blocking CSP meta; remote images stay blocked until the
+	// user explicitly allows them (?allow_remote=1 re-sanitizes permissive).
+	if info.HTMLBody != "" {
+		atts, _ := s.deps.Store.ListAttachments(acc.ID, id)
+		cidData := map[string]string{}
+		for _, at := range atts {
+			if at.CID == "" || !strings.HasPrefix(at.ContentType, "image/") || at.Size > 2<<20 {
+				continue
+			}
+			data, _, _, err := s.deps.Store.ExtractAttachment(acc.ID, id, at.Part)
+			if err != nil || len(data) == 0 || len(data) > 2<<20 {
+				continue
+			}
+			cidData[at.CID] = "data:" + at.ContentType + ";base64," + base64.StdEncoding.EncodeToString(data)
+		}
+		allowRemote := r.URL.Query().Get("allow_remote") == "1"
+		sanitized, hasRemote := sanitizeMailHTML(info.HTMLBody, allowRemote, cidData)
+		resp["html"] = sanitized
+		resp["has_remote_content"] = hasRemote
+		resp["remote_allowed"] = allowRemote
+	}
+	// Attachments metadata only; content is fetched on demand.
+	if len(info.Attachments) > 0 {
+		resp["attachments"] = info.Attachments
+	}
 	writeJSON(w, 200, resp)
+}
+
+// handleMailAttachment serves one attachment with a hard Content-Disposition
+// attachment (never inline), sanitized filename, and a size cap.
+func (s *Server) handleMailAttachment(w http.ResponseWriter, r *http.Request, acc *mailstore.Account, folderID int64, rest string) {
+	// rest = {msgId}/attachments/{part}
+	parts := strings.Split(rest, "/")
+	if len(parts) != 3 || parts[1] != "attachments" {
+		writeErr(w, 404, "not found")
+		return
+	}
+	msgID, err := strconv.ParseInt(parts[0], 10, 64)
+	if err != nil {
+		writeErr(w, 400, "bad message id")
+		return
+	}
+	part, err := strconv.Atoi(parts[2])
+	if err != nil || part < 0 {
+		writeErr(w, 400, "bad attachment index")
+		return
+	}
+	data, filename, _, err := s.deps.Store.ExtractAttachment(acc.ID, msgID, part)
+	if err != nil {
+		writeErr(w, 404, "no such attachment")
+		return
+	}
+	if len(data) > 50<<20 {
+		writeErr(w, 413, "attachment too large")
+		return
+	}
+	w.Header().Set("Content-Type", "application/octet-stream")
+	w.Header().Set("Content-Disposition", `attachment; filename="`+sanitizeFilename(filename)+`"`)
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	_, _ = w.Write(data)
+}
+
+// handleMailCID serves a small inline image referenced by Content-ID, used
+// when the user allows remote/inline content on a message.
+func (s *Server) handleMailCID(w http.ResponseWriter, r *http.Request, acc *mailstore.Account, folderID int64, rest string) {
+	// rest = {msgId}/cid/{urlencoded-cid}
+	parts := strings.SplitN(rest, "/", 3)
+	if len(parts) != 3 || parts[1] != "cid" {
+		writeErr(w, 404, "not found")
+		return
+	}
+	msgID, err := strconv.ParseInt(parts[0], 10, 64)
+	if err != nil {
+		writeErr(w, 400, "bad message id")
+		return
+	}
+	cid, err := url.QueryUnescape(parts[2])
+	if err != nil {
+		writeErr(w, 400, "bad cid")
+		return
+	}
+	atts, err := s.deps.Store.ListAttachments(acc.ID, msgID)
+	if err != nil {
+		writeErr(w, 404, "no such message")
+		return
+	}
+	for _, at := range atts {
+		if at.CID != cid || !strings.HasPrefix(at.ContentType, "image/") || at.Size > 2<<20 {
+			continue
+		}
+		data, _, _, err := s.deps.Store.ExtractAttachment(acc.ID, msgID, at.Part)
+		if err != nil {
+			break
+		}
+		w.Header().Set("Content-Type", at.ContentType)
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+		w.Header().Set("Cache-Control", "private, max-age=3600")
+		_, _ = w.Write(data)
+		return
+	}
+	writeErr(w, 404, "no such image")
 }
 
 func (s *Server) mailReadAll(w http.ResponseWriter, acc *mailstore.Account, folderID int64) {

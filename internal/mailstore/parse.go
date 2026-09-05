@@ -11,6 +11,7 @@ import (
 	"net/mail"
 	"net/textproto"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -41,6 +42,19 @@ type ParsedInfo struct {
 	TextBody   string
 	HTMLBody   string
 	HasAttach  bool
+	// Attachments lists non-body MIME parts in document order. Content is
+	// never included; it is fetched on demand via ExtractAttachment.
+	Attachments []*Attachment
+}
+
+// Attachment describes one non-body MIME part.
+type Attachment struct {
+	Part        int    `json:"part"` // leaf-part index for ExtractAttachment
+	Filename    string `json:"filename"`
+	ContentType string `json:"content_type"`
+	Size        int64  `json:"size"`
+	CID         string `json:"cid,omitempty"`    // Content-ID (inline images), <>-stripped
+	Inline      bool   `json:"inline,omitempty"` // Content-Disposition: inline
 }
 
 var tagRe = regexp.MustCompile(`<[^>]*>`)
@@ -72,9 +86,113 @@ func ParseHeaders(raw []byte) *ParsedInfo {
 	}
 
 	seen := map[string]bool{}
-	walkParts(textproto.MIMEHeader(h), msg.Body, info, seen, 0)
+	var leaves []mimeLeaf
+	collectLeaves(textproto.MIMEHeader(h), msg.Body, &leaves, 0)
+	for i, lf := range leaves {
+		pct := lf.header.Get("Content-Type")
+		mt := partMediaType(pct)
+		dispHeader := lf.header.Get("Content-Disposition")
+		disp := strings.ToLower(strings.SplitN(dispHeader, ";", 2)[0])
+		filename := parseParams(pct)["name"]
+		if fn := parseParams(dispHeader)["filename"]; fn != "" {
+			filename = fn
+		}
+		cid := strings.Trim(lf.header.Get("Content-Id"), "<> \t")
+		isBody := (mt == "text/plain" || mt == "text/html") && filename == ""
+		if !isBody {
+			info.HasAttach = true
+			name := filename
+			if name == "" && cid != "" {
+				name = cid
+			}
+			if name == "" {
+				name = "attachment-" + strconv.Itoa(i+1)
+			}
+			info.Attachments = append(info.Attachments, &Attachment{
+				Part: i, Filename: name, ContentType: mt,
+				Size: int64(len(lf.body)), CID: cid, Inline: disp == "inline",
+			})
+			continue
+		}
+		body := decodeCharset(parseParams(pct)["charset"], lf.body)
+		switch mt {
+		case "text/plain":
+			if !seen["text"] {
+				info.TextBody += string(body)
+				seen["text"] = true
+			}
+		case "text/html":
+			if !seen["html"] {
+				info.HTMLBody += string(body)
+				seen["html"] = true
+			}
+		}
+	}
 	info.Snippet = clip(firstNonEmpty(cleanText(info.TextBody), cleanText(stripHTML(info.HTMLBody))), 280)
 	return info
+}
+
+// mimeLeaf is one non-multipart MIME part with CTE-decoded (binary-safe,
+// charset-untouched) content.
+type mimeLeaf struct {
+	header textproto.MIMEHeader
+	body   []byte
+}
+
+// collectLeaves walks the MIME tree in document order collecting every leaf
+// part (depth-capped, per-part size-capped). The ordering is stable and is
+// the index space shared by ParsedInfo.Attachments and ExtractAttachment.
+func collectLeaves(h textproto.MIMEHeader, r io.Reader, out *[]mimeLeaf, depth int) {
+	if depth > 8 {
+		return
+	}
+	ct := h.Get("Content-Type")
+	if strings.HasPrefix(strings.ToLower(ct), "multipart/") {
+		boundary := parseParams(ct)["boundary"]
+		if boundary == "" {
+			return
+		}
+		mr := multipart.NewReader(r, boundary)
+		for {
+			p, err := mr.NextRawPart()
+			if err != nil {
+				return
+			}
+			pct := p.Header.Get("Content-Type")
+			if strings.HasPrefix(strings.ToLower(pct), "multipart/") {
+				collectLeaves(p.Header, p, out, depth+1)
+				continue
+			}
+			body, _ := io.ReadAll(io.LimitReader(p, 20<<20))
+			*out = append(*out, mimeLeaf{header: p.Header, body: decodeCTE(p.Header.Get("Content-Transfer-Encoding"), body)})
+		}
+		return
+	}
+	body, _ := io.ReadAll(io.LimitReader(r, 20<<20))
+	*out = append(*out, mimeLeaf{header: h, body: decodeCTE(h.Get("Content-Transfer-Encoding"), body)})
+}
+
+// ExtractPart returns the CTE-decoded content of leaf part `part`
+// (same ordering as ParsedInfo.Attachments) plus its filename and type.
+func ExtractPart(raw []byte, part int) (content []byte, filename, ctype string, err error) {
+	msg, err := mail.ReadMessage(bytes.NewReader(raw))
+	if err != nil {
+		return nil, "", "", fmt.Errorf("parse message: %w", err)
+	}
+	var leaves []mimeLeaf
+	collectLeaves(textproto.MIMEHeader(msg.Header), msg.Body, &leaves, 0)
+	if part < 0 || part >= len(leaves) {
+		return nil, "", "", fmt.Errorf("no such attachment")
+	}
+	lf := leaves[part]
+	filename = parseParams(lf.header.Get("Content-Disposition"))["filename"]
+	if filename == "" {
+		filename = parseParams(lf.header.Get("Content-Type"))["name"]
+	}
+	if filename == "" {
+		filename = "attachment"
+	}
+	return lf.body, filename, partMediaType(lf.header.Get("Content-Type")), nil
 }
 
 type parsedAddr struct{ Name, Address string }
@@ -107,65 +225,6 @@ func addressList(s string) []string {
 		}
 	}
 	return out
-}
-
-func walkParts(h textproto.MIMEHeader, r io.Reader, info *ParsedInfo, seen map[string]bool, depth int) {
-	if depth > 8 {
-		return
-	}
-	ct := h.Get("Content-Type")
-	if strings.HasPrefix(strings.ToLower(ct), "multipart/") {
-		boundary := parseParams(ct)["boundary"]
-		if boundary == "" {
-			return
-		}
-		mr := multipart.NewReader(r, boundary)
-		for {
-			p, err := mr.NextRawPart()
-			if err != nil {
-				return
-			}
-			pct := p.Header.Get("Content-Type")
-			if strings.HasPrefix(strings.ToLower(pct), "multipart/") {
-				walkParts(p.Header, p, info, seen, depth+1)
-				continue
-			}
-			body, _ := io.ReadAll(io.LimitReader(p, 20<<20))
-			body = decodeCTE(p.Header.Get("Content-Transfer-Encoding"), body)
-			body = decodeCharset(parseParams(pct)["charset"], body)
-			disp := strings.ToLower(p.Header.Get("Content-Disposition"))
-			filename := parseParams(pct)["name"]
-			if fn := parseParams(p.Header.Get("Content-Disposition"))["filename"]; fn != "" {
-				filename = fn
-			}
-			if disp == "attachment" || filename != "" {
-				info.HasAttach = true
-				continue
-			}
-			mt := partMediaType(pct)
-			switch mt {
-			case "text/plain":
-				if !seen["text"] {
-					info.TextBody += string(body)
-					seen["text"] = true
-				}
-			case "text/html":
-				if !seen["html"] {
-					info.HTMLBody += string(body)
-					seen["html"] = true
-				}
-			}
-		}
-	}
-	body, _ := io.ReadAll(io.LimitReader(r, 20<<20))
-	body = decodeCTE(h.Get("Content-Transfer-Encoding"), body)
-	body = decodeCharset(parseParams(ct)["charset"], body)
-	switch partMediaType(ct) {
-	case "text/html":
-		info.HTMLBody = string(body)
-	default:
-		info.TextBody = string(body)
-	}
 }
 
 func partMediaType(ct string) string {

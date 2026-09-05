@@ -267,6 +267,28 @@ h1,h2,h3,h4 { margin: 0 0 .5em; font-weight: 500; }
 }
 body.dark .msg-body iframe { background: #1e1e22; }
 
+/* Remote-content warning + attachment bar (lazy load) */
+.remote-warn {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  background: color-mix(in srgb, var(--md-tertiary-container) 55%, transparent);
+  color: var(--md-on-tertiary-container);
+  border: 1px solid color-mix(in srgb, var(--md-tertiary) 40%, transparent);
+  border-radius: var(--md-shape-m); padding: 10px 14px; margin-bottom: 12px; font-size: 13px;
+}
+.attach-bar {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  border: 1px solid var(--md-outline-variant); border-radius: var(--md-shape-m);
+  padding: 10px 14px; margin-bottom: 12px; font-size: 13px;
+}
+.attach-bar #m-att-list { display: flex; gap: 8px; flex-wrap: wrap; width: 100%; }
+.att-chip {
+  display: inline-flex; align-items: center; gap: 6px; text-decoration: none;
+  background: var(--md-surface-container-highest); color: var(--md-on-surface);
+  border-radius: 999px; padding: 6px 14px; font-size: 13px; max-width: 320px;
+}
+.att-chip:hover { background: var(--md-secondary-container); }
+.att-chip .muted { font-size: 12px; }
+
 /* ---------- Tables ---------- */
 table.tbl { width: 100%; border-collapse: collapse; }
 table.tbl th {

@@ -46,6 +46,13 @@ function openDialog(title, bodyHTML, onOk, okLabel = "确定") {
   return dlg;
 }
 
+function fmtSize(n) {
+  if (n == null) return "";
+  if (n < 1024) return n + " B";
+  if (n < 1048576) return (n / 1024).toFixed(1) + " KB";
+  return (n / 1048576).toFixed(1) + " MB";
+}
+
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 
 function fmtDate(ts) {
@@ -857,16 +864,16 @@ function renderMailShell(fromAdmin = false) {
     $("#m-readall").onclick = async () => { await api(`/api/mail/folders/${curFolder}/readall`, { method: "POST" }); refreshFolders(); loadMsgs(true); };
     $("#m-more") && ($("#m-more").onclick = () => { state.offset += 50; loadMsgs(false); });
   }
-  async function openMsg(id) {
+  async function openMsg(id, allowRemote = false) {
     curMsg = id;
-    const data = await api(`/api/mail/folders/${curFolder}/messages/${id}`);
+    const data = await api(`/api/mail/folders/${curFolder}/messages/${id}${allowRemote ? "?allow_remote=1" : ""}`);
     const m = data.message;
     $("#m-view").innerHTML = `
     <h3>${esc(m.subject || "(无主题)")}</h3>
     <div class="msg-meta">
       <span class="avatar">${esc((m.from_name || m.from_addr || "?")[0].toUpperCase())}</span>
       <div><b>${esc(m.from_name || "")}</b> &lt;${esc(m.from_addr)}&gt;<br>
-      <span class="muted">收件人: ${esc((m.to_addrs || []).join(", "))} · ${new Date(m.sent_at * 1000).toLocaleString("zh-CN")}${m.has_attach ? " · " + I.paperclip + " 附件" : ""}</span></div>
+      <span class="muted">收件人: ${esc((m.to_addrs || []).join(", "))} · ${new Date(m.sent_at * 1000).toLocaleString("zh-CN")}</span></div>
       <div style="flex:1"></div>
       <button class="icon-btn" data-a="star" title="${m.flags?.includes("\\Flagged") ? "取消星标" : "加星标"}">${m.flags?.includes("\\Flagged") ? I.star : I.starO}</button>
       <button class="icon-btn" data-a="unread" title="标记未读">${I.mail}</button>
@@ -874,7 +881,28 @@ function renderMailShell(fromAdmin = false) {
       <button class="icon-btn" data-a="del" title="删除">${I.trash}</button>
       <a class="btn small text" href="/api/mail/folders/${curFolder}/messages/${id}/raw" download="${id}.eml">原始邮件</a>
     </div>
+    ${data.has_remote_content && !data.remote_allowed ? `
+    <div class="remote-warn" id="m-remote-warn">
+      ${I.info} <span>为防止跟踪和攻击，此邮件的远程内容已阻止加载。</span>
+      <button class="btn small tonal" id="m-allow-remote">显示远程内容</button>
+    </div>` : ""}
+    ${(data.attachments || []).length ? `
+    <div class="attach-bar">
+      <span class="muted">${I.paperclip} ${data.attachments.length} 个附件 · 默认不加载，点击下载</span>
+      <button class="btn small tonal" id="m-att-load">显示附件</button>
+      <div id="m-att-list"></div>
+    </div>` : ""}
     <div class="msg-body" id="m-body"></div>`;
+    const allowBtn = $("#m-allow-remote");
+    allowBtn && (allowBtn.onclick = () => openMsg(id, true));
+    const attBtn = $("#m-att-load");
+    attBtn && (attBtn.onclick = () => {
+      $("#m-att-list").innerHTML = (data.attachments || []).map((a) => `
+        <a class="att-chip" href="/api/mail/folders/${curFolder}/messages/${id}/attachments/${a.part}" download="${esc(a.filename)}" title="下载 ${esc(a.filename)}">
+          ${I.paperclip} ${esc(a.filename)} <span class="muted">${fmtSize(a.size)}</span>
+        </a>`).join("");
+      attBtn.style.display = "none";
+    });
     const body = $("#m-body");
     if (data.html) {
       const f = document.createElement("iframe");
