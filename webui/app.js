@@ -13,33 +13,14 @@ async function api(path, opts = {}) {
   try { data = await res.json(); } catch { /* empty */ }
   if (!res.ok) {
     const msg = (data && data.error) || res.status + " " + res.statusText;
-    if (res.status === 401) { renderLogin(); throw new Error(msg); }
-    if (res.status === 400 && msg === "not installed") { renderSetup(); throw new Error(msg); }
+    if (!o.noRedirect && res.status === 401) { renderLogin(); throw new Error(msg); }
+    if (!o.noRedirect && res.status === 400 && msg === "not installed") { renderSetup(); throw new Error(msg); }
     throw new Error(msg);
   }
   return data;
 }
 
 function isNotInstalled(e) { return String((e && e.message) || "").includes("not installed"); }
-
-/* ---------------- boot ---------------- */
-async function boot() {
-  // cache-buster defeats any pre-no-store cached setup/status response
-  let st = null;
-  try { st = await api("/api/setup/status?_=" + Date.now()); } catch { /* ignore */ }
-  if (st && st.installed === false) return renderSetup();
-  try {
-    await api("/api/status");
-    return renderConsole("overview");
-  } catch (e) {
-    if (isNotInstalled(e)) return renderSetup();
-    try { await api("/api/mail/me"); return renderMailShell(); }
-    catch (e2) {
-      if (isNotInstalled(e2)) return renderSetup();
-      return renderLogin();
-    }
-  }
-}
 
 let toastTimer = null;
 function toast(msg) {
@@ -130,23 +111,33 @@ function renderDnsTable(tableId, domain, host, ip) {
   </tr>`).join("");
 }
 
+// Font Awesome fallback: if the primary CDN (jsDelivr) is unreachable —
+// common in some regions — swap in a mirror so icons don't disappear.
+(function faFallback() {
+  const probe = document.createElement("i");
+  probe.className = "fa-solid fa-envelope";
+  probe.style.cssText = "position:absolute;left:-9999px;visibility:hidden";
+  document.body.appendChild(probe);
+  const ff = getComputedStyle(probe).fontFamily || "";
+  probe.remove();
+  if (/font awesome/i.test(ff)) return;
+  const l = document.createElement("link");
+  l.rel = "stylesheet";
+  l.href = "https://registry.npmmirror.com/@fortawesome/fontawesome-free/6.7.2/files/css/all.min.css";
+  document.head.appendChild(l);
+})();
+
 /* ---------------- boot ---------------- */
 async function boot() {
-  // cache-buster defeats any pre-no-store cached setup/status response
-  let st = null;
-  try { st = await api("/api/setup/status?_=" + Date.now()); } catch { /* ignore */ }
+  // Single silent probe: setup state first, then which session is alive.
+  // Avoids 401 noise (no /api/status probe) and login-page flashes.
+  let st = null, who = null;
+  try { st = await api("/api/setup/status?_=" + Date.now(), { noRedirect: true }); } catch { /* ignore */ }
   if (st && st.installed === false) return renderSetup();
-  try {
-    await api("/api/status");
-    return renderConsole("overview");
-  } catch (e) {
-    if (isNotInstalled(e)) return renderSetup();
-    try { await api("/api/mail/me"); return renderMailShell(); }
-    catch (e2) {
-      if (isNotInstalled(e2)) return renderSetup();
-      return renderLogin();
-    }
-  }
+  try { who = await api("/api/whoami?_=" + Date.now(), { noRedirect: true }); } catch { /* ignore */ }
+  if (who && who.admin) return renderConsole("overview");
+  if (who && who.mail) return renderMailShell();
+  return renderLogin();
 }
 
 /* ---------------- setup wizard ---------------- */
@@ -887,11 +878,20 @@ function renderMailShell(fromAdmin = false) {
     const body = $("#m-body");
     if (data.html) {
       const f = document.createElement("iframe");
-      f.setAttribute("sandbox", "");
+      // allow-same-origin (WITHOUT allow-scripts) lets the app measure the
+      // mail body height; scripts/forms/popups stay blocked by the sandbox.
+      f.setAttribute("sandbox", "allow-same-origin");
       body.appendChild(f);
       f.srcdoc = data.html;
-      f.style.width = "100%"; f.style.border = "none"; f.style.minHeight = "420px";
-      f.onload = () => { try { f.style.height = f.contentDocument.body.scrollHeight + 40 + "px"; } catch {} };
+      f.style.width = "100%"; f.style.border = "none"; f.style.minHeight = "320px";
+      const fit = () => {
+        try {
+          const d = f.contentDocument;
+          const h = Math.max(d.body?.scrollHeight || 0, d.documentElement?.scrollHeight || 0);
+          if (h > 0) f.style.height = (h + 40) + "px";
+        } catch { /* sandboxed; keep min-height */ }
+      };
+      f.onload = () => { fit(); setTimeout(fit, 600); setTimeout(fit, 1800); };
     } else {
       body.textContent = data.text || "(空邮件)";
     }
@@ -914,7 +914,11 @@ function renderMailShell(fromAdmin = false) {
         loadMsgs(true);
       };
     });
-    loadMsgs(true);
+    // Opening a mail marks it read: update the list item in place (keeps
+    // scroll position) and refresh folder unread badges.
+    const item = $(`#m-list [data-m="${id}"]`);
+    if (item) item.classList.remove("unseen");
+    refreshFolders();
   }
   function composeDialog() {
     const cfgDomain = acc.address.split("@")[1];

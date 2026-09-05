@@ -125,8 +125,12 @@ func (s *Server) Handler() http.Handler {
 		// Font Awesome CDN + inline styles (M3 tokens, mail HTML in sandboxed
 		// iframe); scripts only from this origin; emails render in a
 		// sandbox="" srcdoc iframe which additionally blocks scripts.
+		// The pinned sha256 allows the SSO/agent script some deployments
+		// inject into the page without opening the door to arbitrary inline
+		// script (no 'unsafe-inline').
 		h.Set("Content-Security-Policy",
-			"default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; "+
+			"default-src 'self'; script-src 'self' 'sha256-X7c5n+rklTbn02SSOWB9UdJFNB5vYGY1xCfALLI5Dfw='; "+
+				"style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; "+
 				"font-src https://cdn.jsdelivr.net; img-src 'self' data: https:; connect-src 'self'; "+
 				"frame-ancestors 'none'; base-uri 'none'; form-action 'self'")
 		s.mux.ServeHTTP(w, r)
@@ -244,6 +248,8 @@ func (s *Server) handleAPI(w http.ResponseWriter, r *http.Request) {
 	switch {
 	case p == "/api/setup/status":
 		s.handleSetupStatus(w, r)
+	case p == "/api/whoami":
+		s.handleWhoami(w, r)
 	case p == "/api/setup" && r.Method == http.MethodPost:
 		s.handleSetup(w, r)
 	case p == "/api/login":
@@ -284,6 +290,24 @@ func (s *Server) handleSetupStatus(w http.ResponseWriter, r *http.Request) {
 		"primary_domain": cfg.PrimaryDomain,
 		"hostname":       cfg.Hostname,
 	})
+}
+
+// handleWhoami silently reports which session (if any) is active so the UI
+// can route without triggering 401 noise or login-page flashes.
+func (s *Server) handleWhoami(w http.ResponseWriter, r *http.Request) {
+	resp := map[string]any{}
+	if c, err := r.Cookie(adminCookie); err == nil && s.deps.State.ValidSession(c.Value) != nil {
+		resp["admin"] = true
+	}
+	if c, err := r.Cookie(mailCookie); err == nil {
+		s.mailMu.Lock()
+		sess, ok := s.mailSess[c.Value]
+		s.mailMu.Unlock()
+		if ok && time.Now().Before(sess.exp) {
+			resp["mail"] = true
+		}
+	}
+	writeJSON(w, http.StatusOK, resp)
 }
 
 type setupReq struct {
