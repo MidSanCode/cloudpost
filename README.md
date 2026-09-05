@@ -16,6 +16,7 @@
 - **UI**：Material Design 3 令牌与组件（动态色板、深色模式、导航栏、对话框、Snackbar），图标使用 Font Awesome 6（CDN 引入，离线环境可将 `webui/index.html` 中的 CDN 换成本地包）
 - **DNS 指引**：安装向导与控制台总览页自动生成当前域名所需的 DNS 记录清单（A / MX / SPF / PTR / DMARC），含记录值与用途说明
 - **强制重置**：设置页「危险区」可将项目恢复到未安装状态（两步确认：输入 `RESET` → 输入 `删除数据`）；删除全部账号/邮件/过滤规则/队列/配置，协议服务保持运行
+- **管理员密码找回**：忘记密码时可用命令行强制重置（见下文「重置管理员密码」）
 
 ## 快速开始
 
@@ -76,6 +77,26 @@ internal/web/        REST API + 静态 UI 托管
 webui/               Material Design 3 前端（原生 JS，无构建步骤）
 smoke/               端到端冒烟测试客户端
 ```
+
+## 重置管理员密码
+
+忘记管理员密码时，在服务器本机执行（需要对数据目录的文件访问权限——这本身就是自托管实例的信任边界）：
+
+```
+# 方式一：直接传参（注意 shell 历史会记录明文）
+.\cloudpost.exe -data .\cloudpost-data -reset-admin "新密码至少6位"
+
+# 方式二：从 stdin 读入（推荐，不留命令行历史）
+.\cloudpost.exe -data .\cloudpost-data -reset-admin -
+```
+
+行为说明：
+
+- 重置后服务照常启动，用新密码登录即可
+- 所有已发的管理员会话立即失效，旧 Cookie 无法继续使用
+- 未安装过的实例会拒绝执行（提示先跑安装向导）
+- 密码长度限制 6–72 字节（bcrypt 上限）
+- 恢复登录后请从服务启动命令中移除 `-reset-admin` 参数（systemd 用户记得 `daemon-reload` 前先改 unit 文件）
 
 ## 注意事项
 

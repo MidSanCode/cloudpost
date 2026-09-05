@@ -4,6 +4,7 @@ package state
 import (
 	"crypto/rand"
 	"encoding/hex"
+	"fmt"
 	"os"
 	"path/filepath"
 	"sync"
@@ -153,6 +154,26 @@ func (s *State) DropSession(token string) {
 
 // DataDir returns the data directory root.
 func (s *State) DataDir() string { return s.dataDir }
+
+// SetAdminHash replaces the persisted admin password hash (forced reset).
+func (s *State) SetAdminHash(hash string) error {
+	s.mu.Lock()
+	if s.cfg == nil {
+		s.mu.Unlock()
+		return fmt.Errorf("not installed")
+	}
+	s.cfg.AdminHash = hash
+	s.mu.Unlock()
+	return s.Save()
+}
+
+// DropAllSessions invalidates every admin web session; used after a forced
+// password reset so cookies issued under the old password cannot outlive it.
+func (s *State) DropAllSessions() {
+	s.mu.Lock()
+	s.sessions = map[string]*Session{}
+	s.mu.Unlock()
+}
 
 // FactoryReset returns the instance to pre-install state: the config file is
 // deleted and every in-memory session is dropped. Database rows and data

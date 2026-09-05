@@ -2,6 +2,7 @@
 package main
 
 import (
+	"bufio"
 	"flag"
 	"fmt"
 	"log"
@@ -9,9 +10,12 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"crypto/tls"
+
+	"golang.org/x/crypto/bcrypt"
 
 	"cloudpost/internal/db"
 	"cloudpost/internal/fetch"
@@ -35,12 +39,14 @@ func main() {
 	var pop3Addr string
 	var imapAddr string
 	var devReload bool
+	var resetAdmin string
 	flag.StringVar(&dataDir, "data", defaultDataDir(), "data directory")
 	flag.StringVar(&webAddr, "web", "0.0.0.0:8080", "web UI listen address")
 	flag.StringVar(&smtpAddr, "smtp", "", "SMTP listen address (default from config or 0.0.0.0:2525)")
 	flag.StringVar(&pop3Addr, "pop3", "", "POP3 listen address (default from config or 0.0.0.0:1110)")
 	flag.StringVar(&imapAddr, "imap", "", "IMAP listen address (default from config or 0.0.0.0:1143)")
 	flag.BoolVar(&devReload, "dev", false, "serve webui from ./webui (development)")
+	flag.StringVar(&resetAdmin, "reset-admin", "", "force-reset the admin password to this value (use \"-\" to read one line from stdin), then continue starting")
 	flag.Parse()
 
 	log.SetFlags(log.LstdFlags)
@@ -50,6 +56,42 @@ func main() {
 
 	st := state.New(dataDir)
 	st.Load()
+
+	// Forced admin password reset (lockout recovery): requires local access
+	// to the data directory, which is already the trust boundary of a
+	// self-hosted instance. No old password needed; all admin sessions are
+	// invalidated; the daemon keeps starting normally afterwards.
+	if resetAdmin != "" {
+		pw := resetAdmin
+		if pw == "-" {
+			rd := bufio.NewReader(os.Stdin)
+			line, rerr := rd.ReadString('\n')
+			if rerr != nil && line == "" {
+				log.Fatalf("reset-admin: failed to read password from stdin: %v", rerr)
+			}
+			pw = strings.TrimRight(line, "\r\n")
+		}
+		if len(pw) < 6 {
+			log.Fatalf("reset-admin: password must be at least 6 characters")
+		}
+		if len(pw) > 72 {
+			log.Fatalf("reset-admin: password must be at most 72 bytes (bcrypt limit)")
+		}
+		if !st.Installed() {
+			log.Fatalf("reset-admin: this instance is not installed; run the setup wizard first")
+		}
+		h, err := bcrypt.GenerateFromPassword([]byte(pw), bcrypt.DefaultCost)
+		if err != nil {
+			log.Fatalf("reset-admin: %v", err)
+		}
+		if err := st.SetAdminHash(string(h)); err != nil {
+			log.Fatalf("reset-admin: %v", err)
+		}
+		st.DropAllSessions()
+		log.Printf("[admin] admin password has been force-reset; all admin sessions were invalidated")
+		log.Printf("[admin] if another instance is still running, restart it to pick up the new password")
+		log.Printf("[admin] remove the -reset-admin flag from your service command line once you can log in")
+	}
 
 	database, err := db.Open(dataDir)
 	if err != nil {
