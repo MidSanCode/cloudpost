@@ -1,4 +1,4 @@
-﻿package main
+package main
 
 import (
 	"fmt"
@@ -7,7 +7,10 @@ import (
 
 func main() {
 	c, err := smtp.Dial("127.0.0.1:2525")
-	if err != nil { fmt.Println("DIAL:", err); return }
+	if err != nil {
+		fmt.Println("DIAL:", err)
+		return
+	}
 	defer c.Quit()
 	c.Hello("t")
 	c.Auth(smtp.PlainAuth("", "alice@test.local", "alicepw1", "127.0.0.1"))

@@ -487,7 +487,7 @@ async function viewAccounts(el) {
 }
 
 function accToReq(a) {
-  return { kind: a.kind, address: a.address, display_name: a.display_name, remote_proto: a.remote_proto, remote_host: a.remote_host, remote_port: a.remote_port, remote_tls: a.remote_tls, remote_user: a.remote_user, remote_pass: a.remote_pass, remote_folder: a.remote_folder, remote_target: a.remote_target, fetch_interval_min: a.fetch_interval_min, fetch_enabled: a.fetch_enabled, fetch_keep_on_server: a.fetch_keep_on_server };
+  return { kind: a.kind, address: a.address, display_name: a.display_name, remote_proto: a.remote_proto, remote_host: a.remote_host, remote_port: a.remote_port, remote_tls: a.remote_tls, remote_user: a.remote_user, remote_pass: "", has_remote_pass: a.has_remote_pass, remote_folder: a.remote_folder, remote_target: a.remote_target, fetch_interval_min: a.fetch_interval_min, fetch_enabled: a.fetch_enabled, fetch_keep_on_server: a.fetch_keep_on_server };
 }
 
 async function accountDialog(kind, existing) {
@@ -513,7 +513,7 @@ async function accountDialog(kind, existing) {
     </div>
     <div class="row2">
       <div class="field"><label>登录用户名</label><input id="e-user" value="${v("remote_user")}"></div>
-      <div class="field"><label>密码</label><input type="password" id="e-pass" value="${v("remote_pass")}"></div>
+      <div class="field"><label>密码${existing && v("has_remote_pass") ? "（已保存，留空保持不变）" : ""}</label><input type="password" id="e-pass" value="" placeholder="${existing && v("has_remote_pass") ? "••••••••" : ""}"></div>
     </div>
     <div class="field"><label>远程文件夹 (IMAP)</label><input id="e-rfolder" value="${v("remote_folder", "INBOX")}"></div>
     <div class="field"><label>投递到本地邮箱</label><select id="e-target">

@@ -15,7 +15,6 @@ import (
 
 	"golang.org/x/crypto/bcrypt"
 
-	"cloudpost/internal/db"
 	"cloudpost/internal/fetch"
 	"cloudpost/internal/filter"
 	"cloudpost/internal/mailstore"
@@ -42,7 +41,7 @@ type Server struct {
 	deps     Deps
 	mux      *http.ServeMux
 	mailMu   sync.Mutex
-	mailSess map[string]int64 // token -> local account id
+	mailSess map[string]*mailSession // token -> webmail session
 
 	webSwapMu sync.Mutex
 	webSwap   net.Listener // pending replacement listener after a port change
@@ -70,7 +69,7 @@ func (s *Server) setWebSwap(ln net.Listener) {
 
 // New builds the web server.
 func New(deps Deps) *Server {
-	s := &Server{deps: deps, mailSess: map[string]int64{}}
+	s := &Server{deps: deps, mailSess: map[string]*mailSession{}}
 	s.routes()
 	return s
 }
@@ -116,7 +115,23 @@ func (s *Server) resolveStaticDir() string {
 }
 
 // Handler returns the root handler.
-func (s *Server) Handler() http.Handler { return s.mux }
+func (s *Server) Handler() http.Handler {
+	// Baseline hardening headers for every response.
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		h := w.Header()
+		h.Set("X-Content-Type-Options", "nosniff")
+		h.Set("X-Frame-Options", "DENY")
+		h.Set("Referrer-Policy", "no-referrer")
+		// Font Awesome CDN + inline styles (M3 tokens, mail HTML in sandboxed
+		// iframe); scripts only from this origin; emails render in a
+		// sandbox="" srcdoc iframe which additionally blocks scripts.
+		h.Set("Content-Security-Policy",
+			"default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; "+
+				"font-src https://cdn.jsdelivr.net; img-src 'self' data: https:; connect-src 'self'; "+
+				"frame-ancestors 'none'; base-uri 'none'; form-action 'self'")
+		s.mux.ServeHTTP(w, r)
+	})
+}
 
 // ---------------------------------------------------------------------------
 // helpers
@@ -177,6 +192,14 @@ func (s *Server) adminAuth(w http.ResponseWriter, r *http.Request) bool {
 	return true
 }
 
+// mailSession is an authenticated webmail session with a hard expiry.
+type mailSession struct {
+	accID int64
+	exp   time.Time
+}
+
+const mailSessionTTL = 7 * 24 * time.Hour
+
 // mailAccount resolves the data-plane session to a local account.
 func (s *Server) mailAccount(r *http.Request) *mailstore.Account {
 	token := ""
@@ -190,7 +213,15 @@ func (s *Server) mailAccount(r *http.Request) *mailstore.Account {
 		return nil
 	}
 	s.mailMu.Lock()
-	accID, ok := s.mailSess[token]
+	sess, ok := s.mailSess[token]
+	if ok && time.Now().After(sess.exp) {
+		delete(s.mailSess, token) // expired
+		ok = false
+	}
+	var accID int64
+	if ok {
+		accID = sess.accID
+	}
 	s.mailMu.Unlock()
 	if !ok {
 		return nil
@@ -352,6 +383,7 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if bcrypt.CompareHashAndPassword([]byte(cfg.AdminHash), []byte(req.Password)) != nil {
+		time.Sleep(400 * time.Millisecond) // slow brute force
 		writeErr(w, 401, "wrong password")
 		return
 	}
@@ -379,14 +411,15 @@ func (s *Server) handleMailLogin(w http.ResponseWriter, r *http.Request) {
 	}
 	acc, ok := s.deps.Store.VerifyLocalLogin(req.Address, req.Password)
 	if !ok {
+		time.Sleep(400 * time.Millisecond) // slow brute force
 		writeErr(w, 401, "invalid credentials")
 		return
 	}
-	token := stateRandomToken()
+	token := randToken()
 	s.mailMu.Lock()
-	s.mailSess[token] = acc.ID
+	s.mailSess[token] = &mailSession{accID: acc.ID, exp: time.Now().Add(mailSessionTTL)}
 	s.mailMu.Unlock()
-	http.SetCookie(w, &http.Cookie{Name: mailCookie, Value: token, Path: "/", HttpOnly: true, SameSite: http.SameSiteLaxMode})
+	http.SetCookie(w, &http.Cookie{Name: mailCookie, Value: token, Path: "/", HttpOnly: true, SameSite: http.SameSiteLaxMode, MaxAge: int(mailSessionTTL.Seconds())})
 	writeJSON(w, 200, map[string]any{"ok": true, "account": acc})
 }
 
@@ -398,9 +431,4 @@ func (s *Server) handleMailLogout(w http.ResponseWriter, r *http.Request) {
 	}
 	http.SetCookie(w, &http.Cookie{Name: mailCookie, Value: "", Path: "/", MaxAge: -1})
 	writeJSON(w, 200, map[string]any{"ok": true})
-}
-
-func stateRandomToken() string {
-	b, _ := db.JSONMarshal(time.Now().UnixNano())
-	return fmt.Sprintf("%x-%s", time.Now().UnixNano(), string(b))[:32]
 }

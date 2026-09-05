@@ -15,6 +15,8 @@ import (
 var readOnlySelect = &imap.SelectOptions{ReadOnly: true}
 
 // dialIMAP connects to a remote IMAP server per account TLS mode.
+// TLS modes verify server certificates (ServerName pinned to the configured
+// host); "none" is plaintext by explicit user choice.
 func dialIMAP(a *mailstore.Account) (*imapclient.Client, error) {
 	addr := fmt.Sprintf("%s:%d", a.RemoteHost, a.RemotePort)
 	if a.RemotePort == 0 {
@@ -24,13 +26,14 @@ func dialIMAP(a *mailstore.Account) (*imapclient.Client, error) {
 			addr = fmt.Sprintf("%s:993", a.RemoteHost)
 		}
 	}
+	tlsConf := &tls.Config{ServerName: a.RemoteHost, MinVersion: tls.VersionTLS12}
 	switch a.RemoteTLS {
 	case "none":
-		return imapclient.DialInsecure(addr, &imapclient.Options{TLSConfig: &tls.Config{InsecureSkipVerify: true}})
+		return imapclient.DialInsecure(addr, &imapclient.Options{})
 	case "starttls":
-		return imapclient.DialStartTLS(addr, &imapclient.Options{TLSConfig: &tls.Config{InsecureSkipVerify: true}})
+		return imapclient.DialStartTLS(addr, &imapclient.Options{TLSConfig: tlsConf})
 	default:
-		return imapclient.DialTLS(addr, &imapclient.Options{TLSConfig: &tls.Config{InsecureSkipVerify: true}})
+		return imapclient.DialTLS(addr, &imapclient.Options{TLSConfig: tlsConf})
 	}
 }
 

@@ -1,4 +1,4 @@
-﻿package main
+package main
 
 import (
 	"database/sql"
@@ -8,7 +8,10 @@ import (
 
 func main() {
 	db, err := sql.Open("sqlite", "file:.rundata/cloudpost.db?_pragma=busy_timeout(5000)")
-	if err != nil { fmt.Println(err); return }
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
 	defer db.Close()
 	rows, _ := db.Query("SELECT id, subject, flags FROM messages ORDER BY id")
 	defer rows.Close()

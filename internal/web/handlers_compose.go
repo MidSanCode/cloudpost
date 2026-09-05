@@ -13,6 +13,13 @@ func parseForView(raw []byte) *mailstore.ParsedInfo {
 	return mailstore.ParseHeaders(raw)
 }
 
+// sanitizeHeader strips CR/LF/NUL to prevent SMTP header injection via
+// user-controlled header values (RFC 5322 forbids them mid-field).
+func sanitizeHeader(s string) string {
+	r := strings.NewReplacer("\r", "", "\n", "", "\x00", "")
+	return r.Replace(s)
+}
+
 // mailCompose builds an RFC 5322 message and enqueues it for delivery
 // (local recipients are delivered directly).
 func (s *Server) mailCompose(w http.ResponseWriter, r *http.Request, acc *mailstore.Account) {
@@ -30,6 +37,9 @@ func (s *Server) mailCompose(w http.ResponseWriter, r *http.Request, acc *mailst
 		writeErr(w, 400, "to is required")
 		return
 	}
+	req.To = sanitizeHeader(req.To)
+	req.CC = sanitizeHeader(req.CC)
+	req.Subject = sanitizeHeader(req.Subject)
 	cfg := s.deps.State.Config()
 	domain := ""
 	if cfg != nil {
@@ -39,7 +49,7 @@ func (s *Server) mailCompose(w http.ResponseWriter, r *http.Request, acc *mailst
 	fromName := acc.DisplayName
 
 	var b strings.Builder
-	fmt.Fprintf(&b, "From: %s <%s>\r\n", fromName, from)
+	fmt.Fprintf(&b, "From: %s <%s>\r\n", sanitizeHeader(fromName), from)
 	fmt.Fprintf(&b, "To: %s\r\n", req.To)
 	if req.CC != "" {
 		fmt.Fprintf(&b, "Cc: %s\r\n", req.CC)
@@ -94,10 +104,35 @@ func parseRcpts(parts ...string) []string {
 	for _, p := range parts {
 		for _, x := range strings.Split(p, ",") {
 			x = strings.ToLower(strings.TrimSpace(x))
-			if strings.Contains(x, "@") {
+			if strings.Contains(x, "@") && validAddr(x) {
 				out = append(out, x)
 			}
 		}
 	}
 	return out
+}
+
+// validAddr enforces a strict email character set so that header-injection
+// remnants (spaces, colons, control chars) can never become recipients.
+func validAddr(a string) bool {
+	i := strings.LastIndexByte(a, '@')
+	if i <= 0 || i == len(a)-1 {
+		return false
+	}
+	local, domain := a[:i], a[i+1:]
+	if strings.Contains(domain, "..") || strings.HasPrefix(domain, ".") || strings.HasSuffix(domain, ".") {
+		return false
+	}
+	okChars := func(s, extra string) bool {
+		for _, r := range s {
+			switch {
+			case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9':
+			case strings.ContainsRune(extra, r):
+			default:
+				return false
+			}
+		}
+		return true
+	}
+	return okChars(local, "._%+=-") && okChars(domain, ".-")
 }

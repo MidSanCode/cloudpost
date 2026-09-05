@@ -20,17 +20,20 @@ import (
 
 // Account mirrors the accounts table.
 type Account struct {
-	ID                int64  `json:"id"`
-	Kind              string `json:"kind"` // local | remote
-	Address           string `json:"address"`
-	DisplayName       string `json:"display_name"`
-	HasPassword       bool   `json:"has_password"`
-	RemoteProto       string `json:"remote_proto,omitempty"` // imap | pop3
-	RemoteHost        string `json:"remote_host,omitempty"`
-	RemotePort        int    `json:"remote_port,omitempty"`
-	RemoteTLS         string `json:"remote_tls,omitempty"` // ssl | starttls | none
-	RemoteUser        string `json:"remote_user,omitempty"`
-	RemotePass        string `json:"remote_pass,omitempty"`
+	ID          int64  `json:"id"`
+	Kind        string `json:"kind"` // local | remote
+	Address     string `json:"address"`
+	DisplayName string `json:"display_name"`
+	HasPassword bool   `json:"has_password"`
+	RemoteProto string `json:"remote_proto,omitempty"` // imap | pop3
+	RemoteHost  string `json:"remote_host,omitempty"`
+	RemotePort  int    `json:"remote_port,omitempty"`
+	RemoteTLS   string `json:"remote_tls,omitempty"` // ssl | starttls | none
+	RemoteUser  string `json:"remote_user,omitempty"`
+	// RemotePass is the remote account credential. Never serialized to
+	// clients; the API exposes only HasRemotePass.
+	RemotePass        string `json:"-"`
+	HasRemotePass     bool   `json:"has_remote_pass,omitempty"`
 	RemoteFolder      string `json:"remote_folder,omitempty"`
 	RemoteTarget      string `json:"remote_target,omitempty"`
 	FetchEnabled      bool   `json:"fetch_enabled"`
@@ -171,6 +174,7 @@ func scanAccount(sc interface{ Scan(...any) error }) (*Account, error) {
 		return nil, err
 	}
 	a.HasPassword = pw != ""
+	a.HasRemotePass = a.RemotePass != ""
 	a.FetchEnabled = i2bool(fe)
 	a.FetchKeepOnServer = i2bool(keep)
 	a.LastFetchOK = i2bool(fo)
@@ -601,7 +605,9 @@ func (s *Store) SearchMessages(accountID, folderID int64, field, q string, limit
 	if limit <= 0 || limit > 200 {
 		limit = 50
 	}
-	rows, err := s.DB.Query(`SELECT `+msgCols+` FROM messages WHERE folder_id=? AND `+col+` LIKE ?
+	// Escape LIKE wildcards so % and _ match literally.
+	q = strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`).Replace(q)
+	rows, err := s.DB.Query(`SELECT `+msgCols+` FROM messages WHERE folder_id=? AND `+col+` LIKE ? ESCAPE '\'
 		AND flags NOT LIKE '%\Deleted%' ORDER BY sent_at DESC LIMIT ?`, folderID, "%"+q+"%", limit)
 	if err != nil {
 		return nil, err

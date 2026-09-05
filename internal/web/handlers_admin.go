@@ -762,7 +762,7 @@ func (s *Server) doFullReset() error {
 		return err
 	}
 	s.mailMu.Lock()
-	s.mailSess = map[string]int64{}
+	s.mailSess = map[string]*mailSession{}
 	s.mailMu.Unlock()
 	return nil
 }

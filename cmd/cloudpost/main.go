@@ -146,12 +146,29 @@ func main() {
 		}()
 	}
 
-	// Self-signed TLS cert (used by the web UI when CLOUDPOST_WEB_TLS=1).
+	// Optional TLS for the web UI (CLOUDPOST_WEB_TLS=1): self-signed cert
+	// generated on first run, reused afterwards.
+	var webTLSCert *tls.Certificate
 	if os.Getenv("CLOUDPOST_WEB_TLS") == "1" {
 		if cert, err := tlsutil.EnsureCert(filepath.Join(dataDir, "certs"), domain); err == nil {
-			log.Printf("[tls] self-signed certificate ready for %s", domain)
-			_ = cert
+			webTLSCert = cert
+			log.Printf("[web] TLS enabled (self-signed certificate for %s)", domain)
+		} else {
+			log.Printf("[web] TLS requested but certificate generation failed: %v", err)
 		}
+	}
+	wrapTLS := func(ln net.Listener) net.Listener {
+		if webTLSCert == nil || ln == nil {
+			return ln
+		}
+		return tls.NewListener(ln, &tls.Config{
+			Certificates: []tls.Certificate{*webTLSCert},
+			MinVersion:   tls.VersionTLS12,
+		})
+	}
+	scheme := "http"
+	if webTLSCert != nil {
+		scheme = "https"
 	}
 
 	// Web UI + API.
@@ -181,7 +198,7 @@ func main() {
 		Handler:           webSrv.Handler(),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
-	log.Printf("[web] cloudpost %s listening on http://%s", version, webListen)
+	log.Printf("[web] cloudpost %s listening on %s://%s", version, scheme, webListen)
 	log.Printf("[web] open the UI in your browser to run the installation wizard")
 
 	// Serve the web UI; honor live port changes by swapping listeners.
@@ -194,7 +211,7 @@ func main() {
 			if err != nil {
 				log.Fatalf("[web] %v", err)
 			}
-			webLn = ln
+			webLn = wrapTLS(ln)
 		}
 		pm.TrackWebListener(webLn)
 		err := httpServer.Serve(webLn)
@@ -202,7 +219,7 @@ func main() {
 		if swap := webSrv.TakeWebSwap(); swap != nil {
 			webListen = swap.Addr().String()
 			log.Printf("[web] serving on new port %s", webListen)
-			webLn = swap
+			webLn = wrapTLS(swap)
 			continue
 		}
 		if err == http.ErrServerClosed || err == nil {
@@ -266,6 +283,3 @@ func defaultDataDir() string {
 	}
 	return "./cloudpost-data"
 }
-
-var _ net.Conn
-var _ = tls.VersionTLS12

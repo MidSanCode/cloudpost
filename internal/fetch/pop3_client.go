@@ -32,7 +32,8 @@ func pop3Connect(host string, port int, tlsMode string) (*pop3Client, error) {
 	if err != nil {
 		return nil, err
 	}
-	tlsConf := &tls.Config{ServerName: host, InsecureSkipVerify: true}
+	// Verify server certificates (ServerName pinned to the configured host).
+	tlsConf := &tls.Config{ServerName: host, MinVersion: tls.VersionTLS12}
 	c := &pop3Client{conn: raw, br: bufio.NewReaderSize(raw, 32<<10)}
 	if _, err := c.readLine(); err != nil {
 		c.close()

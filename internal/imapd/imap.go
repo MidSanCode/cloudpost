@@ -103,6 +103,7 @@ type session struct {
 func (s *session) Login(username, password string) error {
 	acc, ok := s.deps.Store.VerifyLocalLogin(username, password)
 	if !ok {
+		time.Sleep(400 * time.Millisecond) // slow brute force
 		return imapserver.ErrAuthFailed
 	}
 	s.account = acc

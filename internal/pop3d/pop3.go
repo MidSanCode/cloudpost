@@ -136,6 +136,7 @@ func (pc *popConn) dispatch(line string) bool {
 		}
 		acc, ok := pc.deps.Store.VerifyLocalLogin(user, arg)
 		if !ok {
+			time.Sleep(400 * time.Millisecond) // slow brute force
 			pc.writeLine("-ERR [AUTH] invalid credentials")
 			return true
 		}
