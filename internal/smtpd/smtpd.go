@@ -169,6 +169,15 @@ func (s *session) Data(r io.Reader) error {
 	if !anyOK {
 		return &smtp.SMTPError{Code: 451, Message: "Delivery failed"}
 	}
+	// Keep a copy in the authenticated sender's Sent folder so SMTP-sent
+	// mail shows up in the webmail 发送记录 just like webmail compose does.
+	if s.authenticated && s.authAccountID > 0 {
+		if sent, err := s.deps.Store.FolderByName(s.authAccountID, "Sent"); err == nil {
+			if _, _, err := s.deps.Store.Deliver(s.authAccountID, sent.ID, raw, nil); err != nil {
+				log.Printf("[smtp] sent-copy for account %d failed: %v", s.authAccountID, err)
+			}
+		}
+	}
 	log.Printf("[smtp] %s -> local=%v remote=%v bytes=%d", s.from, localRcpts, remoteRcpts, len(raw))
 	s.Reset()
 	return nil

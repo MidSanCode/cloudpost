@@ -30,6 +30,13 @@ type Config struct {
 	RelayPort   int    `json:"relay_port"`
 	RelayUser   string `json:"relay_user"`
 	RelayPass   string `json:"relay_pass"`
+
+	// DKIM signing for outbound mail (applies to the primary domain only).
+	// DKIMKeyPEM holds the RSA private key in PEM (PKCS#1 or PKCS#8); the
+	// public half is published as a DNS TXT record <selector>._domainkey.<domain>.
+	DKIMEnabled  bool   `json:"dkim_enabled"`
+	DKIMSelector string `json:"dkim_selector"`
+	DKIMKeyPEM   string `json:"dkim_key_pem,omitempty"`
 }
 
 // State is the process-wide runtime state.

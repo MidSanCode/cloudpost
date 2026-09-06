@@ -746,6 +746,48 @@ async function viewQueue(el) {
   $("#q-flush").onclick = async () => { await api("/api/queue/flush", { method: "POST" }); toast("已触发重试"); drawView("queue"); };
 }
 
+async function drawDKIM() {
+  const box = $("#dkim-box");
+  if (!box) return;
+  let dk;
+  try { dk = await api("/api/dkim"); } catch (e) { box.textContent = e.message; return; }
+  box.innerHTML = `
+  <div class="muted mb">对发自本域（${esc(dk.domain)}）的外发邮件附加 DKIM 签名，接收方通过 DNS 里的公钥验证，降低被判垃圾邮件的概率。私钥保存在本机配置中。</div>
+  <div class="row2">
+    <div class="field"><label>Selector（DNS 选择器）</label><input id="dk-selector" value="${esc(dk.selector)}" placeholder="mail"></div>
+    <div class="field"><label>启用签名</label><label class="switch"><input type="checkbox" id="dk-enabled" ${dk.enabled ? "checked" : ""}><span class="track"></span></label></div>
+  </div>
+  <div class="flex mb">
+    <button class="btn tonal" id="dk-gen">${I.key} 生成 2048 位密钥</button>
+    ${dk.has_key ? `<span class="chip ok">已配置密钥</span>` : `<span class="chip">尚无密钥</span>`}
+  </div>
+  ${dk.dns_record ? `
+  <div class="dns-panel">
+    <div class="dns-title">${I.dns} 需要发布的 DNS 记录（TXT）</div>
+    <div class="mono" style="word-break:break-all">${esc(dk.dns_record)}</div>
+    <div class="dns-note">主机记录：<span class="mono">${esc(dk.dns_host)}</span> · 生成或更换密钥后请在 DNS 服务商同步更新此记录，生效可能需要几分钟到 48 小时。</div>
+  </div>` : ""}
+  <div class="field mt"><label>导入已有私钥（PEM，可选，留空保持不变）</label><textarea id="dk-pem" style="min-height:90px;font-family:monospace;font-size:12px" placeholder="-----BEGIN RSA PRIVATE KEY-----"></textarea></div>
+  <button class="btn filled" id="dk-save">保存 DKIM 设置</button>`;
+  $("#dk-gen").onclick = async () => {
+    try {
+      const sel = $("#dk-selector").value.trim();
+      await api("/api/dkim/generate", { method: "POST", body: { selector: sel } });
+      toast("密钥已生成，请发布下方 DNS 记录"); drawDKIM();
+    } catch (e) { toast(e.message); }
+  };
+  $("#dk-save").onclick = async () => {
+    try {
+      await api("/api/dkim", { method: "POST", body: {
+        enabled: $("#dk-enabled").checked,
+        selector: $("#dk-selector").value.trim(),
+        private_key: $("#dk-pem").value.trim(),
+      } });
+      toast("已保存"); drawDKIM();
+    } catch (e) { toast(e.message); }
+  };
+}
+
 async function viewSettings(el) {
   const s = await api("/api/settings");
   const eff = (k) => s["effective_" + k] || s[k.replace("_port", "") + "_port"] || "—";
@@ -778,6 +820,10 @@ async function viewSettings(el) {
     <button class="btn filled" id="st-save">保存设置</button>
   </div>
   <div class="card mt" style="max-width:760px">
+    <h3>DKIM 签名（外发邮件防伪造）</h3>
+    <div id="dkim-box" class="muted">加载中…</div>
+  </div>
+  <div class="card mt" style="max-width:760px">
     <h3>修改管理员密码</h3>
     <div class="row2">
       <div class="field"><label>当前密码</label><input type="password" id="pw-old"></div>
@@ -791,6 +837,7 @@ async function viewSettings(el) {
     <button class="btn filled btn-danger" id="st-reset">强制重置项目…</button>
   </div>`;
   $("#st-reset").onclick = resetFlow;
+  drawDKIM();
   $("#st-ports-save").onclick = async () => {
     const ports = {};
     for (const [id, key] of [["st-web", "web_port"], ["st-smtp", "smtp_port"], ["st-pop3", "pop3_port"], ["st-imap", "imap_port"]]) {

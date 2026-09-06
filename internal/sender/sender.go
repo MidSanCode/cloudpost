@@ -124,6 +124,8 @@ func (s *Sender) deliver(it *QueueItem) {
 		s.finish(it, "failed", "blob lost: "+err.Error())
 		return
 	}
+	// DKIM-sign outbound mail from the primary domain before delivery.
+	raw, _ = s.dkimSign(it.From, raw)
 	cfg := s.deps.State.Config()
 	var lastErr error
 	for _, rcpt := range it.Recipients {

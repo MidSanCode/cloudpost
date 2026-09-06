@@ -282,7 +282,7 @@ func (s *Server) handleAPI(w http.ResponseWriter, r *http.Request) {
 		strings.HasPrefix(p, "/api/folders"), strings.HasPrefix(p, "/api/queue"),
 		strings.HasPrefix(p, "/api/settings"), strings.HasPrefix(p, "/api/status"),
 		strings.HasPrefix(p, "/api/remote"), strings.HasPrefix(p, "/api/users"),
-		strings.HasPrefix(p, "/api/reset/"):
+		strings.HasPrefix(p, "/api/dkim"), strings.HasPrefix(p, "/api/reset/"):
 		if !s.adminAuth(w, r) {
 			return
 		}

@@ -3,6 +3,7 @@ package web
 import (
 	"crypto/rand"
 	"encoding/hex"
+	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
@@ -13,6 +14,7 @@ import (
 	"cloudpost/internal/db"
 	"cloudpost/internal/fetch"
 	"cloudpost/internal/mailstore"
+	"cloudpost/internal/sender"
 	"cloudpost/internal/state"
 )
 
@@ -165,6 +167,12 @@ func (s *Server) handleAdmin(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 404, "not found")
 	case p == "/api/remote/test" && m == http.MethodPost:
 		s.adminTestRemote(w, r)
+	case p == "/api/dkim" && m == http.MethodGet:
+		s.adminDKIMStatus(w, r)
+	case p == "/api/dkim/generate" && m == http.MethodPost:
+		s.adminDKIMGenerate(w, r)
+	case p == "/api/dkim" && m == http.MethodPost:
+		s.adminDKIMSave(w, r)
 	case p == "/api/queue" && m == http.MethodGet:
 		s.adminQueue(w, r)
 	case p == "/api/queue/flush" && m == http.MethodPost:
@@ -185,6 +193,127 @@ func (s *Server) handleAdmin(w http.ResponseWriter, r *http.Request) {
 	default:
 		writeErr(w, http.StatusNotFound, "not found")
 	}
+}
+
+// ---------------------------------------------------------------------------
+// DKIM signing
+
+func (s *Server) dkimRecordFor(cfg *state.Config) string {
+	if cfg == nil || cfg.DKIMKeyPEM == "" || cfg.PrimaryDomain == "" || cfg.DKIMSelector == "" {
+		return ""
+	}
+	key, err := sender.ParseDKIMKey(cfg.DKIMKeyPEM)
+	if err != nil {
+		return ""
+	}
+	return fmt.Sprintf("%s._domainkey.%s TXT \"%s\"", cfg.DKIMSelector, cfg.PrimaryDomain, sender.DKIMDNSRecord(cfg.DKIMSelector, cfg.PrimaryDomain, key))
+}
+
+func (s *Server) adminDKIMStatus(w http.ResponseWriter, r *http.Request) {
+	cfg := s.deps.State.Config()
+	if cfg == nil {
+		writeErr(w, 400, "not installed")
+		return
+	}
+	out := map[string]any{
+		"enabled":    cfg.DKIMEnabled,
+		"selector":   cfg.DKIMSelector,
+		"domain":     cfg.PrimaryDomain,
+		"has_key":    cfg.DKIMKeyPEM != "",
+		"dns_record": s.dkimRecordFor(cfg),
+		"dns_host":   "",
+	}
+	if cfg.DKIMSelector != "" && cfg.PrimaryDomain != "" {
+		out["dns_host"] = cfg.DKIMSelector + "._domainkey." + cfg.PrimaryDomain
+	}
+	writeJSON(w, 200, out)
+}
+
+func (s *Server) adminDKIMGenerate(w http.ResponseWriter, r *http.Request) {
+	cfg := s.deps.State.Config()
+	if cfg == nil {
+		writeErr(w, 400, "not installed")
+		return
+	}
+	var req struct {
+		Selector string `json:"selector"`
+	}
+	if err := readJSON(r, &req); err != nil || !validSelector(req.Selector) {
+		writeErr(w, 400, "selector must be 1-63 chars of a-z 0-9 . _ -")
+		return
+	}
+	privPEM, pubB64, err := sender.GenerateDKIMKey()
+	if err != nil {
+		writeErr(w, 500, err.Error())
+		return
+	}
+	cfg.DKIMSelector = req.Selector
+	cfg.DKIMKeyPEM = privPEM
+	if err := s.deps.State.SetConfig(cfg); err != nil {
+		writeErr(w, 500, err.Error())
+		return
+	}
+	writeJSON(w, 200, map[string]any{
+		"ok":         true,
+		"selector":   cfg.DKIMSelector,
+		"dns_host":   cfg.DKIMSelector + "._domainkey." + cfg.PrimaryDomain,
+		"dns_record": fmt.Sprintf("v=DKIM1; k=rsa; p=%s", pubB64),
+	})
+}
+
+func validSelector(s string) bool {
+	if len(s) == 0 || len(s) > 63 {
+		return false
+	}
+	for _, c := range s {
+		switch {
+		case c >= 'a' && c <= 'z', c >= '0' && c <= '9', c == '.', c == '_', c == '-':
+		default:
+			return false
+		}
+	}
+	return true
+}
+
+func (s *Server) adminDKIMSave(w http.ResponseWriter, r *http.Request) {
+	cfg := s.deps.State.Config()
+	if cfg == nil {
+		writeErr(w, 400, "not installed")
+		return
+	}
+	var req struct {
+		Enabled    bool   `json:"enabled"`
+		Selector   string `json:"selector"`
+		PrivateKey string `json:"private_key"`
+	}
+	if err := readJSON(r, &req); err != nil {
+		writeErr(w, 400, "bad json")
+		return
+	}
+	if req.Selector != "" {
+		if !validSelector(req.Selector) {
+			writeErr(w, 400, "selector must be 1-63 chars of a-z 0-9 . _ -")
+			return
+		}
+		cfg.DKIMSelector = req.Selector
+	}
+	if strings.TrimSpace(req.PrivateKey) != "" {
+		if _, err := sender.ParseDKIMKey(req.PrivateKey); err != nil {
+			writeErr(w, 400, "invalid private key: "+err.Error())
+			return
+		}
+		cfg.DKIMKeyPEM = strings.TrimSpace(req.PrivateKey)
+	}
+	if cfg.DKIMEnabled && (cfg.DKIMSelector == "" || cfg.DKIMKeyPEM == "") {
+		writeErr(w, 400, "generate a key and set a selector before enabling")
+		return
+	}
+	cfg.DKIMEnabled = req.Enabled
+	if err := s.deps.State.SetConfig(cfg); err != nil {
+		writeErr(w, 500, err.Error())
+		return
+	}
+	writeJSON(w, 200, map[string]any{"ok": true})
 }
 
 func p2(r *http.Request) *http.Request { return r }
