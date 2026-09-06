@@ -1,5 +1,0 @@
-From: alice@t.local
-To: alice@t.local
-Subject: dkim test
-
-hello dkim
