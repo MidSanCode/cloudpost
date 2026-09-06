@@ -834,23 +834,28 @@ function renderMailShell(fromAdmin = false) {
   function draw() {
     app.innerHTML = `
     <div class="main">
-      <div class="topbar">
+      <div class="topbar mail-topbar">
         <button class="icon-btn" id="m-back" title="${fromAdmin ? "返回控制台" : "退出"}">${fromAdmin ? I.back : I.logout}</button>
-        <h2>${I.mail} ${esc(acc.address)}</h2>
-        <input id="m-search" placeholder="${I.search} 搜索主题/发件人…" style="height:38px;border:1px solid var(--md-outline);border-radius:999px;padding:0 16px;background:var(--md-surface-container-high);color:var(--md-on-surface);width:280px">
+        <h2>${I.mail} <span class="mail-addr">${esc(acc.address)}</span></h2>
+        <div class="search-field" id="m-search-wrap">
+          <span class="ic">${I.search}</span>
+          <input id="m-search" placeholder="搜索主题/发件人…">
+        </div>
         <button class="icon-btn" id="m-refresh" title="刷新">${I.refresh}</button>
+        <button class="icon-btn" id="m-theme" title="切换亮暗色">${I.dark}</button>
         <button class="btn filled small" id="m-compose">${I.edit} 写邮件</button>
       </div>
       <div class="mail-layout">
         <div class="folder-list" id="m-folders"></div>
         <div class="msg-list" id="m-list"></div>
-        <div class="msg-view" id="m-view"><div class="empty">选择一封邮件查看</div></div>
+        <div class="msg-view" id="m-view"><div class="empty">${I.mail}<br>选择一封邮件查看</div></div>
       </div>
     </div>`;
     $("#m-back").onclick = async () => {
       await api("/api/mail/logout", { method: "POST" }).catch(() => {});
       fromAdmin ? renderConsole("mail") : renderLogin();
     };
+    $("#m-theme").onclick = themeToggle;
     $("#m-refresh").onclick = refreshFolders;
     $("#m-compose").onclick = composeDialog;
     $("#m-search").addEventListener("keydown", (e) => {
@@ -891,7 +896,7 @@ function renderMailShell(fromAdmin = false) {
     state.total = data.total;
     const unread = (m) => !m.flags?.includes("\\Seen");
     $("#m-list").innerHTML = `
-    <div class="flex spread" style="padding:8px 16px;position:sticky;top:0;background:var(--md-surface);z-index:2">
+    <div class="list-head flex spread">
       <span class="muted">${state.total} 封</span>
       <button class="btn small text" id="m-readall">全部已读</button>
     </div>

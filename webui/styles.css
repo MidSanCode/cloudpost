@@ -209,6 +209,23 @@ h1,h2,h3,h4 { margin: 0 0 .5em; font-weight: 500; }
 .topbar input { min-width: 0; max-width: 100%; }
 .content { flex: 1; overflow: auto; padding: 16px 24px 32px; }
 
+/* Webmail topbar variant: pill search field + theme toggle */
+.mail-topbar { background: var(--md-surface-container); }
+.mail-topbar h2 { font-size: 17px; flex: 0 1 auto; }
+.mail-topbar .mail-addr { font-weight: 400; color: var(--md-on-surface-variant); }
+.search-field {
+  display: flex; align-items: center; gap: 8px; flex: 0 1 300px; min-width: 120px;
+  height: 40px; padding: 0 16px; border-radius: 999px;
+  background: var(--md-surface-container-high); color: var(--md-on-surface-variant);
+}
+.search-field:focus-within { outline: 2px solid var(--md-primary); }
+.search-field .ic { font-size: 15px; display: inline-flex; }
+.search-field input {
+  flex: 1; min-width: 0; border: none; outline: none; background: transparent;
+  color: var(--md-on-surface); font: 14px var(--md-font);
+}
+.search-field input::placeholder { color: var(--md-on-surface-variant); }
+
 /* ---------- Mail view ---------- */
 .mail-layout {
   display: flex; height: calc(100vh - 64px); min-height: 0;
@@ -237,9 +254,9 @@ h1,h2,h3,h4 { margin: 0 0 .5em; font-weight: 500; }
   overscroll-behavior: contain; scrollbar-gutter: stable;
   background: color-mix(in srgb, var(--md-surface) 88%, var(--md-surface-container));
 }
-.msg-item { padding: 12px 16px; border-bottom: 1px solid var(--md-outline-variant); cursor: pointer; }
+.msg-item { padding: 12px 16px; border-bottom: 1px solid var(--md-outline-variant); cursor: pointer; transition: background .15s; }
 .msg-item:hover { background: color-mix(in srgb, var(--md-on-surface) 6%, transparent); }
-.msg-item.active { background: var(--md-secondary-container); }
+.msg-item.active { background: var(--md-secondary-container); box-shadow: inset 3px 0 0 var(--md-primary); }
 .msg-item .top { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; min-width: 0; }
 .msg-item .from {
   font-weight: 600; font-size: 14px; min-width: 0; flex: 1;
@@ -247,9 +264,16 @@ h1,h2,h3,h4 { margin: 0 0 .5em; font-weight: 500; }
 }
 .msg-item.unseen .from { color: var(--md-primary); }
 .msg-item.unseen .from::before { content: "●"; font-size: 9px; margin-right: 6px; vertical-align: 2px; }
+.msg-item.unseen .subj { font-weight: 600; color: var(--md-on-surface); }
+.msg-item .subj { font-size: 13px; margin-top: 2px; color: var(--md-on-surface-variant); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .msg-item .date { font-size: 12px; color: var(--md-on-surface-variant); flex-shrink: 0; font-variant-numeric: tabular-nums; }
-.msg-item .subj { font-size: 13px; margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .msg-item .snip { font-size: 12px; color: var(--md-on-surface-variant); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-top: 2px; }
+
+/* Sticky list header (count + read-all) */
+.list-head {
+  padding: 8px 16px; position: sticky; top: 0; z-index: 2;
+  background: var(--md-surface); border-bottom: 1px solid var(--md-outline-variant);
+}
 
 .msg-view { flex: 1; overflow-y: auto; padding: 20px 28px; min-width: 0; overscroll-behavior: contain; }
 .msg-view h3 { font-size: 20px; margin-bottom: 8px; overflow-wrap: anywhere; }
@@ -334,6 +358,14 @@ table.tbl tr:hover td { background: color-mix(in srgb, var(--md-on-surface) 5%, 
 .muted { color: var(--md-on-surface-variant); }
 .mt { margin-top: 16px; } .mb { margin-bottom: 16px; }
 .empty { text-align: center; color: var(--md-on-surface-variant); padding: 48px 0; }
+.empty .fa-solid, .empty .fa-regular { display: block; font-size: 40px; opacity: .35; margin: 0 auto 10px; }
+.empty::after { content: ""; display: block; }
+
+/* Themed thin scrollbars for the scrolling panes */
+.msg-list, .folder-list, .msg-view, .content, .dlg-body {
+  scrollbar-width: thin;
+  scrollbar-color: var(--md-outline-variant) transparent;
+}
 .switch { position: relative; display: inline-block; width: 52px; height: 32px; flex-shrink: 0; }
 .switch input { opacity: 0; width: 0; height: 0; }
 .switch .track {
