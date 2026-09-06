@@ -448,6 +448,7 @@ async function viewAccounts(el) {
         ${remote ? `<button class="btn small text" data-f="fetch" data-id="${a.id}">${I.refresh} 立即拉取</button>` : ""}
         ${remote ? `<button class="btn small text" data-f="test" data-id="${a.id}">测试</button>` : ""}
         <button class="btn small text" data-f="edit" data-id="${a.id}">${I.edit}</button>
+        ${!remote ? `<button class="btn small text" data-f="tokens" data-id="${a.id}">${I.key} 令牌</button>` : ""}
         ${!remote ? `<button class="btn small text" data-f="folders" data-id="${a.id}">${I.folder}</button>` : ""}
         <button class="btn small text" data-f="del" data-id="${a.id}" style="color:var(--md-error)">删除</button>
       </td>
@@ -478,6 +479,7 @@ async function viewAccounts(el) {
         toast((res.ok ? "✔ " : "✘ ") + res.detail);
       }
       if (b.dataset.f === "folders") return foldersDialog(acc);
+      if (b.dataset.f === "tokens") return tokensDialog(acc);
     };
   });
   $("#a-local").onclick = () => accountDialog("local");
@@ -544,8 +546,46 @@ async function accountDialog(kind, existing) {
   }, "保存");
 }
 
-async function foldersDialog(acc) {
-  const folders = await api(`/api/accounts/${acc.id}/folders`);
+// Access-token manager for a local mailbox: create (secret shown once),
+// list, and revoke tokens used for external REST automation.
+async function tokensDialog(acc) {
+  const draw = async () => {
+    const tokens = await api(`/api/accounts/${acc.id}/tokens`);
+    const rows = tokens.map((t) => `<tr>
+      <td>#${t.id} ${esc(t.label || "")}</td>
+      <td class="muted">${new Date(t.created_at * 1000).toLocaleString("zh-CN")}</td>
+      <td class="muted">${t.last_used_at ? new Date(t.last_used_at * 1000).toLocaleString("zh-CN") : "从未使用"}</td>
+      <td>${t.revoked ? '<span class="chip err">已吊销</span>' : `<button class="btn small text" data-revoke="${t.id}" style="color:var(--md-error)">吊销</button>`}</td>
+    </tr>`).join("");
+    openDialog(`${I.key} 访问令牌 · ${esc(acc.address)}`, `
+      <div class="muted mb">供外部程序调用本邮箱的 REST API（/api/mail/*）：请求头携带
+      <span class="mono">Authorization: Bearer &lt;令牌&gt;</span>。令牌只在创建时显示一次，请立即保存；泄露或不用时随时吊销。</div>
+      <div class="flex mb"><input id="tk-label" placeholder="令牌备注（如 CI 脚本）" style="flex:1;padding:10px;border:1px solid var(--md-outline);border-radius:8px;background:var(--md-surface-container-highest);color:var(--md-on-surface)">
+      <button class="btn tonal" id="tk-add">${I.add} 生成令牌</button></div>
+      <div id="tk-secret"></div>
+      <table class="tbl"><thead><tr><th>令牌</th><th>创建时间</th><th>最近使用</th><th></th></tr></thead>
+      <tbody>${rows || `<tr><td colspan="4" class="muted">暂无令牌</td></tr>`}</tbody></table>`,
+      () => {}, "关闭");
+    $("#tk-add").onclick = async () => {
+      try {
+        const res = await api(`/api/accounts/${acc.id}/tokens`, { method: "POST", body: { label: $("#tk-label").value } });
+        $("#tk-secret").innerHTML = `<div class="dns-note" style="border:1px solid var(--md-outline-variant);border-radius:8px;padding:10px">
+          ${I.info} 令牌已生成（仅此一次显示，请立即复制）：<br><span class="mono" style="word-break:break-all">${esc(res.secret)}</span>
+          <button class="btn small text" id="tk-copy">复制</button></div>`;
+        $("#tk-copy").onclick = () => { navigator.clipboard?.writeText(res.secret); toast("已复制"); };
+      } catch (e) { toast(e.message); }
+    };
+    document.querySelectorAll("#dlg-body [data-revoke]").forEach((b) => {
+      b.onclick = async () => {
+        try { await api(`/api/accounts/${acc.id}/tokens/${b.dataset.revoke}`, { method: "DELETE" }); toast("已吊销"); $("#dlg").close(); tokensDialog(acc); }
+        catch (e) { toast(e.message); }
+      };
+    });
+  };
+  await draw();
+}
+
+async function foldersDialog(acc) {  const folders = await api(`/api/accounts/${acc.id}/folders`);
   const rows = folders.map((f) => `<tr><td>${esc(f.name)}</td><td>${f.count}</td><td>${f.unseen ? `<span class="chip">${f.unseen} 未读</span>` : ""}</td>
     <td>${f.name !== "INBOX" ? `<button class="btn small text" data-del="${f.id}" style="color:var(--md-error)">删除</button>` : ""}</td></tr>`).join("");
   openDialog(`文件夹 · ${esc(acc.address)}`, `

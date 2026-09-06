@@ -205,7 +205,23 @@ type mailSession struct {
 const mailSessionTTL = 7 * 24 * time.Hour
 
 // mailAccount resolves the data-plane session to a local account.
+//
+// Two authentication paths are accepted:
+//   - webmail session cookie / X-Mail-Token (interactive UI);
+//   - per-account API access token via "Authorization: Bearer cpat_…"
+//     (external automation; tokens are managed by the admin, see
+//     /api/accounts/{id}/tokens).
 func (s *Server) mailAccount(r *http.Request) *mailstore.Account {
+	if h := r.Header.Get("Authorization"); strings.HasPrefix(h, "Bearer ") {
+		plain := strings.TrimSpace(strings.TrimPrefix(h, "Bearer "))
+		if strings.HasPrefix(plain, "cpat_") {
+			acc, _, err := s.deps.Store.AccountByAPIToken(plain)
+			if err != nil || acc == nil {
+				return nil
+			}
+			return acc
+		}
+	}
 	token := ""
 	if c, err := r.Cookie(mailCookie); err == nil {
 		token = c.Value

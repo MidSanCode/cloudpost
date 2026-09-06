@@ -59,6 +59,37 @@ go build -o cloudpost.exe ./cmd/cloudpost
 - 配置中继：所有外部邮件经中继服务器发送（设置 → SMTP 中继）
 - 发送失败自动指数退避重试（最多 8 次），队列可在控制台查看/手动重试
 
+## REST API 自动化（访问令牌）
+
+为本地邮箱生成 **API 访问令牌**，外部脚本无需邮箱密码即可调用该邮箱的 REST API（令牌格式 `cpat_…`，数据库只存 SHA-256 哈希，明文仅在创建时显示一次）。
+
+**生成/管理**：控制台 → 账号 → 本地邮箱行 → 「令牌」；或直接调 API：
+
+```bash
+# 生成（需管理员登录）
+curl -X POST https://host/api/accounts/1/tokens \
+  -H "Cookie: cp_admin=<session>" -d '{"label":"ci-script"}'
+# → {"token":{...},"secret":"cpat_xxx","usage":"Authorization: Bearer <secret> on /api/mail/* endpoints"}
+
+# 列出 / 吊销
+curl https://host/api/accounts/1/tokens    -H "Cookie: cp_admin=<session>"
+curl -X DELETE https://host/api/accounts/1/tokens/<tokenID> -H "Cookie: cp_admin=<session>"
+```
+
+**用令牌调数据面 API**（管理员与邮箱会话均可管理的全部 `/api/mail/*` 接口）：
+
+```bash
+TOK="cpat_xxx"; BASE=https://host
+curl -H "Authorization: Bearer $TOK" $BASE/api/mail/me            # 邮箱身份
+curl -H "Authorization: Bearer $TOK" $BASE/api/mail/folders       # 文件夹列表
+curl -H "Authorization: Bearer $TOK" "$BASE/api/mail/folders/1/messages?limit=50"
+curl -H "Authorization: Bearer $TOK" "$BASE/api/mail/folders/1/messages/<id>"   # 读信
+curl -H "Authorization: Bearer $TOK" -X POST $BASE/api/mail/compose \
+  -H "Content-Type: application/json" -d '{"to":"someone@example.com","subject":"hi","body":"..."}'
+```
+
+令牌权限与邮箱登录完全相同（读写该邮箱、可发信），吊销立即生效；`last_used_at` 可用于审计是否仍在使用。远程拉取账号不提供令牌。
+
 ## 架构
 
 ```

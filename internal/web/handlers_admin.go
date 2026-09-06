@@ -111,6 +111,31 @@ func (s *Server) handleAdmin(w http.ResponseWriter, r *http.Request) {
 			writeErr(w, 400, "bad id")
 			return
 		}
+		// Per-account API access tokens (managed under the account).
+		if rest := strings.TrimPrefix(p, "/api/accounts/"); strings.Contains(rest, "/tokens") {
+			segs := strings.Split(rest, "/")
+			accID, err := strconv.ParseInt(segs[0], 10, 64)
+			if err != nil {
+				writeErr(w, 400, "bad account id")
+				return
+			}
+			switch {
+			case len(segs) == 2 && segs[1] == "tokens" && m == http.MethodGet:
+				s.adminListTokens(w, r, accID)
+			case len(segs) == 2 && segs[1] == "tokens" && m == http.MethodPost:
+				s.adminCreateToken(w, r, accID)
+			case len(segs) == 3 && segs[1] == "tokens" && m == http.MethodDelete:
+				tokenID, err := strconv.ParseInt(segs[2], 10, 64)
+				if err != nil {
+					writeErr(w, 400, "bad token id")
+					return
+				}
+				s.adminRevokeToken(w, r, accID, tokenID)
+			default:
+				writeErr(w, 404, "not found")
+			}
+			return
+		}
 		switch m {
 		case http.MethodGet:
 			s.adminGetAccount(w, r, id)
@@ -334,6 +359,56 @@ func orStr(v, def string) string {
 func (s *Server) adminDeleteAccount(w http.ResponseWriter, r *http.Request, id int64) {
 	if err := s.deps.Store.DeleteAccount(id); err != nil {
 		writeErr(w, 500, err.Error())
+		return
+	}
+	writeJSON(w, 200, map[string]any{"ok": true})
+}
+
+// ---------------------------------------------------------------------------
+// API access tokens (per local account, for external automation)
+
+func (s *Server) adminListTokens(w http.ResponseWriter, r *http.Request, accID int64) {
+	list, err := s.deps.Store.ListAPITokens(accID)
+	if err != nil {
+		writeErr(w, 500, err.Error())
+		return
+	}
+	if list == nil {
+		list = []*mailstore.APIToken{}
+	}
+	writeJSON(w, 200, list)
+}
+
+func (s *Server) adminCreateToken(w http.ResponseWriter, r *http.Request, accID int64) {
+	acc, err := s.deps.Store.GetAccount(accID)
+	if err != nil || acc.Kind != "local" {
+		writeErr(w, 404, "no such local account")
+		return
+	}
+	var req struct {
+		Label string `json:"label"`
+	}
+	if r.ContentLength > 0 {
+		if err := readJSON(r, &req); err != nil {
+			writeErr(w, 400, "bad json")
+			return
+		}
+	}
+	tok, plain, err := s.deps.Store.CreateAPIToken(accID, req.Label)
+	if err != nil {
+		writeErr(w, 500, err.Error())
+		return
+	}
+	writeJSON(w, 200, map[string]any{
+		"token":  tok,
+		"secret": plain, // shown exactly once
+		"usage":  "Authorization: Bearer <secret> on /api/mail/* endpoints",
+	})
+}
+
+func (s *Server) adminRevokeToken(w http.ResponseWriter, r *http.Request, accID, tokenID int64) {
+	if err := s.deps.Store.RevokeAPIToken(accID, tokenID); err != nil {
+		writeErr(w, 400, err.Error())
 		return
 	}
 	writeJSON(w, 200, map[string]any{"ok": true})

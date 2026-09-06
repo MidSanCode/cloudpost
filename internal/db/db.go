@@ -140,6 +140,16 @@ CREATE TABLE IF NOT EXISTS remote_state (
 	v TEXT NOT NULL,
 	PRIMARY KEY(account_id, k)
 );
+CREATE TABLE IF NOT EXISTS api_tokens (
+	id INTEGER PRIMARY KEY AUTOINCREMENT,
+	account_id INTEGER NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+	token_hash TEXT NOT NULL UNIQUE,
+	label TEXT NOT NULL DEFAULT '',
+	created_at INTEGER NOT NULL,
+	last_used_at INTEGER NOT NULL DEFAULT 0,
+	revoked INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_api_tokens_account ON api_tokens(account_id);
 `
 	_, err := d.Exec(schema)
 	// Tolerate upgrades from older DBs (column added later).
@@ -151,7 +161,7 @@ CREATE TABLE IF NOT EXISTS remote_state (
 // the factory-reset flow; the schema itself is reused for the next install.
 func Reset(d *sql.DB) error {
 	tables := []string{
-		"messages", "folders", "filters", "send_queue", "remote_state",
+		"messages", "folders", "filters", "send_queue", "remote_state", "api_tokens",
 		"accounts", "sessions", "users", "settings",
 	}
 	for _, t := range tables {
