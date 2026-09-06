@@ -204,16 +204,17 @@ func (s *Store) CreateLocalAccount(address, password, displayName string) (*Acco
 }
 
 // CreateRemoteAccount creates a remote fetch account.
+//
+// NOTE: the remote credential is stored recoverable (like every mail client
+// does): the fetcher must present it verbatim to the remote IMAP/POP3
+// server, so it can never be hashed. Only LOCAL account passwords are
+// bcrypt-hashed (they are verified locally, never sent anywhere).
 func (s *Store) CreateRemoteAccount(a *Account) (*Account, error) {
 	if a.Address == "" || a.RemoteProto == "" || a.RemoteHost == "" {
 		return nil, fmt.Errorf("address, proto and host are required")
 	}
 	if a.RemoteProto != "imap" && a.RemoteProto != "pop3" {
 		return nil, fmt.Errorf("proto must be imap or pop3")
-	}
-	h, err := hashPassword(a.RemotePass)
-	if err != nil {
-		return nil, err
 	}
 	if a.RemoteTLS == "" {
 		a.RemoteTLS = "ssl"
@@ -228,7 +229,7 @@ func (s *Store) CreateRemoteAccount(a *Account) (*Account, error) {
 		remote_tls,remote_user,remote_pass,remote_folder,remote_target,fetch_enabled,fetch_interval_min,fetch_keep_on_server,created_at)
 		VALUES('remote',?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		normalizeAddr(a.Address), a.DisplayName, a.RemoteProto, a.RemoteHost, a.RemotePort,
-		a.RemoteTLS, a.RemoteUser, h, a.RemoteFolder, normalizeAddr(a.RemoteTarget), bool2i(a.FetchEnabled), a.FetchIntervalMin, bool2i(a.FetchKeepOnServer), now())
+		a.RemoteTLS, a.RemoteUser, a.RemotePass, a.RemoteFolder, normalizeAddr(a.RemoteTarget), bool2i(a.FetchEnabled), a.FetchIntervalMin, bool2i(a.FetchKeepOnServer), now())
 	if err != nil {
 		return nil, err
 	}

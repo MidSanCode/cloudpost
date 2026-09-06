@@ -43,7 +43,15 @@ func (f *Fetcher) fetchIMAP(a *mailstore.Account) (int, error) {
 	if err != nil {
 		return 0, fmt.Errorf("connect: %w", err)
 	}
-	defer client.Logout().Wait()
+	// NOTE: `defer client.Logout().Wait()` would send LOGOUT immediately
+	// (Go evaluates the call at defer registration and defers only Wait),
+	// making every server drop the connection before login.
+	defer func() { _ = client.Logout().Wait() }()
+	// QQ Mail / NetEase and other providers' IMAP servers require the client
+	// to identify itself with the RFC 2971 ID command BEFORE LOGIN; without
+	// it they close the connection, which surfaces as "login: unexpected EOF".
+	// Best-effort: servers without ID support just answer BAD and we move on.
+	_, _ = client.ID(&imap.IDData{Name: "cloudpost", Version: "1.0"}).Wait()
 	if err := client.Login(a.RemoteUser, a.RemotePass).Wait(); err != nil {
 		return 0, fmt.Errorf("login: %w", err)
 	}
