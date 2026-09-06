@@ -362,9 +362,69 @@ table.tbl tr:hover td { background: color-mix(in srgb, var(--md-on-surface) 5%, 
   .msg-view { padding: 16px 18px; }
   .msg-view h3 { font-size: 17px; }
 }
+/* Message-reader back button: only visible in mobile single-pane mode */
+.m-back-msg { display: none; }
+
+/* ---------- Mobile adaptation (≤ 760px) ---------- */
 @media (max-width: 760px) {
-  .mail-layout { height: auto; min-height: calc(100vh - 64px); }
-  .folder-list { width: 100%; border-right: none; border-bottom: 1px solid var(--md-outline-variant); max-height: 132px; }
-  .msg-list { width: 100%; max-height: 38vh; }
-  .msg-view { padding: 14px; }
+  :root { --nav-h: calc(64px + env(safe-area-inset-bottom, 0px)); }
+
+  /* Console: side rail becomes a bottom navigation bar */
+  .shell { display: block; height: 100dvh; }
+  .rail {
+    position: fixed; left: 0; right: 0; bottom: 0; z-index: 30;
+    width: 100%; height: var(--nav-h);
+    padding: 4px 2px calc(4px + env(safe-area-inset-bottom, 0px));
+    flex-direction: row; align-items: stretch; gap: 0;
+    border-top: 1px solid var(--md-outline-variant);
+  }
+  .rail .brand { display: none; }
+  .rail > div:not(.rail-item) { display: none; } /* spacer */
+  .rail-item { width: auto; flex: 1; min-width: 0; padding: 2px 0; font-size: 11px; }
+  .rail-item .ic { width: 100%; padding: 6px 0; border-radius: 12px; }
+  .shell .main { height: calc(100dvh - var(--nav-h)); }
+  .topbar { height: 56px; padding: 0 8px; gap: 4px; }
+  .topbar h2 { flex: 0 1 auto; font-size: 15px; }
+  .topbar input { width: auto !important; flex: 1 1 60px; min-width: 60px; }
+  .content { padding: 12px 10px calc(var(--nav-h) + 16px); }
+  .snackbar { bottom: calc(var(--nav-h) + 12px); }
+
+  /* Grid helpers collapse to one column */
+  .row2, .row3 { grid-template-columns: 1fr; }
+  .center-screen { padding: 16px; align-items: flex-start; }
+  .auth-card { padding: 24px 18px; margin-top: 6vh; }
+  .grid-cards { gap: 10px; }
+  .stat { padding: 14px; }
+  .stat .num { font-size: 24px; }
+
+  /* Wide tables scroll horizontally instead of squishing */
+  .card { overflow-x: auto; }
+  table.tbl { min-width: 560px; }
+  .dns-panel { overflow-x: auto; }
+  .dns-panel table { min-width: 460px; }
+
+  /* Dialogs become bottom sheets */
+  .m3-dialog {
+    width: 100%; max-width: 100vw; margin: auto auto 0;
+    border-radius: 16px 16px 0 0; max-height: 92dvh; padding: 18px 14px;
+  }
+  .dlg-body { max-height: 62dvh; }
+
+  /* Webmail: single-pane flow (list ⇄ full-screen reader) */
+  .mail-layout { height: calc(100dvh - 56px); flex-direction: column; }
+  .mail-layout .msg-view { display: none; padding: 12px 12px 28px; }
+  .folder-list {
+    width: 100%; flex-shrink: 0; border-right: none; border-bottom: 1px solid var(--md-outline-variant);
+    display: flex; flex-direction: row; gap: 6px; overflow-x: auto; overflow-y: hidden;
+    padding: 8px; scrollbar-width: none;
+  }
+  .folder-list::-webkit-scrollbar { display: none; }
+  .folder-item { width: auto; flex-shrink: 0; padding: 8px 14px; }
+  .msg-list { width: 100%; flex: 1; max-height: none; border-right: none; }
+  .mail-layout.show-msg .folder-list,
+  .mail-layout.show-msg .msg-list { display: none; }
+  .mail-layout.show-msg .msg-view { display: block; flex: 1; }
+  .m-back-msg { display: inline-flex !important; }
+  .msg-view h3 { font-size: 17px; }
+  .msg-body iframe { min-height: 260px; }
 }

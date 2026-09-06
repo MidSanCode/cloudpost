@@ -793,7 +793,7 @@ function renderMailShell(fromAdmin = false) {
   const state = { offset: 0, total: 0, q: "" };
   function draw() {
     app.innerHTML = `
-    <div class="main" style="height:100vh">
+    <div class="main">
       <div class="topbar">
         <button class="icon-btn" id="m-back" title="${fromAdmin ? "返回控制台" : "退出"}">${fromAdmin ? I.back : I.logout}</button>
         <h2>${I.mail} ${esc(acc.address)}</h2>
@@ -826,7 +826,11 @@ function renderMailShell(fromAdmin = false) {
         ${f.unseen ? `<span class="badge">${f.unseen}</span>` : ""}
       </button>`).join("");
     $("#m-folders").querySelectorAll("[data-f]").forEach((b) => {
-      b.onclick = () => { curFolder = parseInt(b.dataset.f); curMsg = null; state.offset = 0; state.q = ""; $("#m-search").value = ""; refreshFolders(); loadMsgs(true); };
+      b.onclick = () => {
+        curFolder = parseInt(b.dataset.f); curMsg = null; state.offset = 0; state.q = ""; $("#m-search").value = "";
+        document.querySelector(".mail-layout")?.classList.remove("show-msg");
+        refreshFolders(); loadMsgs(true);
+      };
     });
     if (!curFolder && folders.length) { curFolder = folders[0].id; $("#m-folders").querySelector(`[data-f="${curFolder}"]`)?.classList.add("active"); loadMsgs(true); }
   }
@@ -868,9 +872,12 @@ function renderMailShell(fromAdmin = false) {
     curMsg = id;
     const data = await api(`/api/mail/folders/${curFolder}/messages/${id}${allowRemote ? "?allow_remote=1" : ""}`);
     const m = data.message;
+    const mailLayout = document.querySelector(".mail-layout");
+    mailLayout && mailLayout.classList.add("show-msg");
     $("#m-view").innerHTML = `
     <h3>${esc(m.subject || "(无主题)")}</h3>
     <div class="msg-meta">
+      <button class="icon-btn m-back-msg" id="m-back-msg" title="返回列表">${I.back}</button>
       <span class="avatar">${esc((m.from_name || m.from_addr || "?")[0].toUpperCase())}</span>
       <div><b>${esc(m.from_name || "")}</b> &lt;${esc(m.from_addr)}&gt;<br>
       <span class="muted">收件人: ${esc((m.to_addrs || []).join(", "))} · ${new Date(m.sent_at * 1000).toLocaleString("zh-CN")}</span></div>
@@ -895,6 +902,11 @@ function renderMailShell(fromAdmin = false) {
     <div class="msg-body" id="m-body"></div>`;
     const allowBtn = $("#m-allow-remote");
     allowBtn && (allowBtn.onclick = () => openMsg(id, true));
+    $("#m-back-msg").onclick = () => {
+      mailLayout && mailLayout.classList.remove("show-msg");
+      curMsg = null;
+      $("#m-view").innerHTML = `<div class="empty">选择一封邮件查看</div>`;
+    };
     const attBtn = $("#m-att-load");
     attBtn && (attBtn.onclick = () => {
       $("#m-att-list").innerHTML = (data.attachments || []).map((a) => `
@@ -930,7 +942,11 @@ function renderMailShell(fromAdmin = false) {
         if (a === "unread") await api(`/api/mail/folders/${curFolder}/messages/${id}/flags`, { method: "POST", body: { mode: "remove", flags: ["\\Seen"] } });
         if (a === "del") {
           await api(`/api/mail/folders/${curFolder}/messages/${id}/delete`, { method: "POST" });
-          toast("已删除"); loadMsgs(true); $("#m-view").innerHTML = `<div class="empty">选择一封邮件查看</div>`; refreshFolders(); return;
+          toast("已删除"); loadMsgs(true);
+          document.querySelector(".mail-layout")?.classList.remove("show-msg");
+          curMsg = null;
+          $("#m-view").innerHTML = `<div class="empty">选择一封邮件查看</div>`;
+          refreshFolders(); return;
         }
         if (a === "move") {
           openDialog("移动到文件夹", `<div class="field"><label>文件夹名称</label><input id="mv-name" value="Trash"></div>`, async () => {
