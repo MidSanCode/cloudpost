@@ -449,12 +449,28 @@ func (s *Server) handleMailLogin(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 400, "bad json")
 		return
 	}
+	// Admins may open ANY mailbox without its password — including remote
+	// accounts' own storage (where remote-fetched mail lands when no
+	// 投递目标 is set) — from the console.
+	if c, err := r.Cookie(adminCookie); err == nil && s.deps.State.ValidSession(c.Value) != nil {
+		acc, err := s.deps.Store.GetAccountByAddressAny(strings.ToLower(strings.TrimSpace(req.Address)))
+		if err != nil {
+			writeErr(w, 404, "no such account")
+			return
+		}
+		s.startMailSession(w, acc)
+		return
+	}
 	acc, ok := s.deps.Store.VerifyLocalLogin(req.Address, req.Password)
 	if !ok {
 		time.Sleep(400 * time.Millisecond) // slow brute force
 		writeErr(w, 401, "invalid credentials")
 		return
 	}
+	s.startMailSession(w, acc)
+}
+
+func (s *Server) startMailSession(w http.ResponseWriter, acc *mailstore.Account) {
 	token := randToken()
 	s.mailMu.Lock()
 	s.mailSess[token] = &mailSession{accID: acc.ID, exp: time.Now().Add(mailSessionTTL)}

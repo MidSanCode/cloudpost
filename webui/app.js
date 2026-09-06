@@ -416,17 +416,16 @@ function viewAdminMail(el) {
   el.innerHTML = `
   <div class="card" style="max-width:520px">
     <h3>${I.key} 打开邮箱</h3>
-    <p class="muted">管理员可打开任意本地邮箱查看邮件。远程账号拉取的邮件会投递到所选目标邮箱。</p>
-    <div class="field"><label>邮箱地址</label><select id="mp-acc"></select></div>
-    <div class="field"><label>邮箱密码</label><input type="password" id="mp-pw"></div>
-    <button class="btn filled" id="mp-go">打开</button>
+    <p class="muted">管理员可免密打开任意邮箱（含远程拉取账号自身的存储）。远程账号若设置了「投递到本地邮箱」，邮件在该目标邮箱的收件箱。</p>
+    <div class="field"><label>邮箱</label><select id="mp-acc"></select></div>
+    <button class="btn filled" id="mp-go">打开邮箱</button>
   </div>`;
   loadAccounts().then((accs) => {
-    $("#mp-acc").innerHTML = accs.filter((a) => a.kind === "local").map((a) => `<option value="${esc(a.address)}">${esc(a.address)}</option>`).join("");
+    $("#mp-acc").innerHTML = accs.map((a) => `<option value="${esc(a.address)}">${esc(a.address)}${a.kind === "remote" ? "（远程拉取）" : ""}</option>`).join("");
   });
   $("#mp-go").onclick = async () => {
     try {
-      await api("/api/mail/login", { method: "POST", body: { address: $("#mp-acc").value, password: $("#mp-pw").value } });
+      await api("/api/mail/login", { method: "POST", body: { address: $("#mp-acc").value, password: "" } });
       renderMailShell(true);
     } catch (e) { toast(e.message); }
   };
@@ -445,6 +444,7 @@ async function viewAccounts(el) {
       <td>${remote ? (a.remote_target ? esc(a.remote_target) : "<span class='muted'>未指定</span>") : "—"}</td>
       <td>${remote ? (a.last_fetch_at ? new Date(a.last_fetch_at * 1000).toLocaleString("zh-CN") : "从未") + " " + (a.last_fetch_ok ? '<span class="chip ok">正常</span>' : `<span class="chip err">${esc(a.last_error || "失败")}</span>`) : "—"}</td>
       <td class="flex">
+        ${remote ? `<button class="btn small text" data-f="viewmail" data-id="${a.id}">${I.mail} 查看邮件</button>` : ""}
         ${remote ? `<button class="btn small text" data-f="fetch" data-id="${a.id}">${I.refresh} 立即拉取</button>` : ""}
         ${remote ? `<button class="btn small text" data-f="test" data-id="${a.id}">测试</button>` : ""}
         <button class="btn small text" data-f="edit" data-id="${a.id}">${I.edit}</button>
@@ -480,6 +480,13 @@ async function viewAccounts(el) {
       }
       if (b.dataset.f === "folders") return foldersDialog(acc);
       if (b.dataset.f === "tokens") return tokensDialog(acc);
+      if (b.dataset.f === "viewmail") {
+        try {
+          await api("/api/mail/login", { method: "POST", body: { address: acc.address, password: "" } });
+          renderMailShell(true);
+        } catch (e) { toast(e.message); }
+        return;
+      }
     };
   });
   $("#a-local").onclick = () => accountDialog("local");
@@ -517,9 +524,9 @@ async function accountDialog(kind, existing) {
     </div>
     <div class="field"><label>远程文件夹 (IMAP)</label><input id="e-rfolder" value="${v("remote_folder", "INBOX")}"></div>
     <div class="field"><label>投递到本地邮箱</label><select id="e-target">
-      <option value="">独立存放</option>
-      ${locals.map((a) => `<option value="${esc(a.address)}" ${existing && existing.remote_target === a.address ? "selected" : ""}>${esc(a.address)}</option>`).join("")}
-    </select><div class="hint">拉取的邮件将进入该本地邮箱的收件箱（过滤规则随后生效）。</div></div>
+      <option value="">独立存放（仅管理员「查看邮件」可见）</option>
+      ${locals.map((a) => `<option value="${esc(a.address)}" ${existing ? (existing.remote_target === a.address ? "selected" : "") : (locals[0] && locals[0].address === a.address ? "selected" : "")}>${esc(a.address)}</option>`).join("")}
+    </select><div class="hint">拉取的邮件将进入该本地邮箱的收件箱（过滤规则随后生效）。独立存放的邮件不进入任何本地邮箱，请用账号行的「查看邮件」打开。</div></div>
     <div class="row2">
       <div class="field"><label>拉取间隔(分钟)</label><input type="number" id="e-interval" value="${v("fetch_interval_min", 15)}"></div>
       <div class="field"><label>在服务器保留邮件</label><label class="switch"><input type="checkbox" id="e-keep" ${!existing || existing.fetch_keep_on_server ? "checked" : ""}><span class="track"></span></label></div>

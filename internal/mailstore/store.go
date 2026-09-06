@@ -252,6 +252,14 @@ func (s *Store) GetAccountByAddress(address string) (*Account, error) {
 	return scanAccount(row)
 }
 
+// GetAccountByAddressAny resolves any account by address regardless of kind.
+// Used by the admin mailbox-open flow: remote accounts store their fetched
+// mail under their own id, so admins must be able to open them too.
+func (s *Store) GetAccountByAddressAny(address string) (*Account, error) {
+	row := s.DB.QueryRow(`SELECT `+accountCols+` FROM accounts WHERE address=?`, normalizeAddr(address))
+	return scanAccount(row)
+}
+
 // ListAccounts lists all accounts with unread counts.
 func (s *Store) ListAccounts() ([]*Account, error) {
 	rows, err := s.DB.Query(`SELECT ` + accountCols + ` FROM accounts ORDER BY kind, id`)
