@@ -39,10 +39,14 @@ type Account struct {
 	FetchEnabled      bool   `json:"fetch_enabled"`
 	FetchIntervalMin  int    `json:"fetch_interval_min"`
 	FetchKeepOnServer bool   `json:"fetch_keep_on_server"`
-	LastFetchAt       int64  `json:"last_fetch_at"`
-	LastFetchOK       bool   `json:"last_fetch_ok"`
-	LastError         string `json:"last_error"`
-	CreatedAt         int64  `json:"created_at"`
+	// Signature is appended to webmail/API-composed mail (SMTP clients
+	// build their own MIME, so their messages are left untouched).
+	// Supports placeholders {{date}} {{time}} {{datetime}} {{from}} {{address}}.
+	Signature   string `json:"signature,omitempty"`
+	LastFetchAt int64  `json:"last_fetch_at"`
+	LastFetchOK bool   `json:"last_fetch_ok"`
+	LastError   string `json:"last_error"`
+	CreatedAt   int64  `json:"created_at"`
 }
 
 // Folder mirrors the folders table.
@@ -98,6 +102,7 @@ type Filter struct {
 type Store struct {
 	DB      *sql.DB
 	blobDir string
+	dataDir string
 }
 
 // New creates a Store rooted at dataDir (blobs under dataDir/blobs).
@@ -106,13 +111,14 @@ func New(database *sql.DB, dataDir string) (*Store, error) {
 	if err := os.MkdirAll(blobDir, 0o755); err != nil {
 		return nil, err
 	}
-	return &Store{DB: database, blobDir: blobDir}, nil
+	return &Store{DB: database, blobDir: blobDir, dataDir: dataDir}, nil
 }
 
-// WipeBlobs removes every stored message blob and the outbound queue files.
-// Called during factory reset; the directories are recreated on demand.
+// WipeBlobs removes every stored message blob, the outbound queue files and
+// the scheduled (delayed) messages. Called during factory reset; the
+// directories are recreated on demand.
 func (s *Store) WipeBlobs(dataDir string) error {
-	for _, dir := range []string{s.blobDir, filepath.Join(dataDir, "outbound")} {
+	for _, dir := range []string{s.blobDir, filepath.Join(dataDir, "outbound"), filepath.Join(dataDir, "scheduled")} {
 		entries, err := os.ReadDir(dir)
 		if err != nil {
 			if os.IsNotExist(err) {
@@ -159,7 +165,7 @@ func i2bool(i int64) bool { return i != 0 }
 
 const accountCols = `id, kind, address, display_name, password_hash, remote_proto, remote_host,
 remote_port, remote_tls, remote_user, remote_pass, remote_folder, remote_target,
-fetch_enabled, fetch_interval_min, fetch_keep_on_server,
+fetch_enabled, fetch_interval_min, fetch_keep_on_server, signature,
 last_fetch_at, last_fetch_ok, last_error, created_at`
 
 func scanAccount(sc interface{ Scan(...any) error }) (*Account, error) {
@@ -168,7 +174,7 @@ func scanAccount(sc interface{ Scan(...any) error }) (*Account, error) {
 	var fe, fo, keep int64
 	err := sc.Scan(&a.ID, &a.Kind, &a.Address, &a.DisplayName, &pw, &a.RemoteProto, &a.RemoteHost,
 		&a.RemotePort, &a.RemoteTLS, &a.RemoteUser, &a.RemotePass, &a.RemoteFolder, &a.RemoteTarget,
-		&fe, &a.FetchIntervalMin, &keep,
+		&fe, &a.FetchIntervalMin, &keep, &a.Signature,
 		&a.LastFetchAt, &fo, &a.LastError, &a.CreatedAt)
 	if err != nil {
 		return nil, err
@@ -291,10 +297,10 @@ func (s *Store) UpdateAccount(a *Account, newPass string) error {
 	}
 	_, err := s.DB.Exec(`UPDATE accounts SET address=?, display_name=?, remote_proto=?, remote_host=?,
 		remote_port=?, remote_tls=?, remote_user=?, remote_pass=?, remote_folder=?, remote_target=?,
-		fetch_enabled=?, fetch_interval_min=?, fetch_keep_on_server=? WHERE id=?`,
+		fetch_enabled=?, fetch_interval_min=?, fetch_keep_on_server=?, signature=? WHERE id=?`,
 		normalizeAddr(a.Address), a.DisplayName, a.RemoteProto, a.RemoteHost, a.RemotePort,
 		a.RemoteTLS, a.RemoteUser, a.RemotePass, a.RemoteFolder, normalizeAddr(a.RemoteTarget),
-		bool2i(a.FetchEnabled), a.FetchIntervalMin, bool2i(a.FetchKeepOnServer), a.ID)
+		bool2i(a.FetchEnabled), a.FetchIntervalMin, bool2i(a.FetchKeepOnServer), a.Signature, a.ID)
 	return err
 }
 

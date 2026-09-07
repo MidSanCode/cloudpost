@@ -112,8 +112,9 @@ func main() {
 	}
 
 	// Outbound sender.
-	snd := sender.New(sender.Deps{DB: database, State: st})
+	snd := sender.New(sender.Deps{DB: database, State: st, Store: store})
 	go snd.Run(30 * time.Second)
+	go snd.RunScheduled() // dispatch due delayed sends into the queue
 
 	// Remote fetch worker.
 	fetcher := fetch.New(fetch.Deps{Store: store, Engine: engine, DB: database})

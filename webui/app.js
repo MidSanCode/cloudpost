@@ -506,7 +506,9 @@ async function accountDialog(kind, existing) {
     html = `
     <div class="field"><label>邮箱地址</label><input id="e-addr" value="${v("address")}" placeholder="alice@${v("domain", "")}"></div>
     <div class="field"><label>显示名称</label><input id="e-name" value="${v("display_name")}"></div>
-    <div class="field"><label>密码 ${existing ? "(留空不修改)" : ""}</label><input type="password" id="e-pw" placeholder="${existing ? "••••••" : "用于 SMTP/POP3/IMAP/网页登录"}"></div>`;
+    <div class="field"><label>密码 ${existing ? "(留空不修改)" : ""}</label><input type="password" id="e-pw" placeholder="${existing ? "••••••" : "用于 SMTP/POP3/IMAP/网页登录"}"></div>
+    <div class="field"><label>邮件签名（写邮件时自动附加到末尾，留空关闭）</label><textarea id="e-sig" style="min-height:80px;font-size:13px">${v("signature")}</textarea>
+      <div class="hint">支持变量：{{date}} 日期 · {{time}} 时间 · {{datetime}} 日期时间 · {{from}} 显示名 · {{address}} 邮箱地址 · {{subject}} 主题。例：发自 {{address}} · {{datetime}}</div></div>`;
   } else {
     html = `
     <div class="field"><label>远程邮箱地址</label><input id="e-addr" value="${v("address")}" placeholder="someone@gmail.com"></div>
@@ -537,6 +539,7 @@ async function accountDialog(kind, existing) {
     const get = (id) => $("#" + id) ? $("#" + id).value : undefined;
     const body = {
       kind, address: get("e-addr"), display_name: get("e-name"), password: get("e-pw") || "",
+      signature: get("e-sig") ?? undefined,
       remote_proto: get("e-proto"), remote_host: get("e-host"), remote_port: parseInt(get("e-port")) || 0,
       remote_tls: get("e-tls"), remote_user: get("e-user"), remote_pass: get("e-pass") || "",
       remote_folder: get("e-rfolder") || "INBOX", remote_target: get("e-target") || "",
@@ -630,7 +633,7 @@ async function viewFilters(el) {
   $("#f-acc").onchange = () => { localStorage.setItem("cp_filter_acc", $("#f-acc").value); drawView("filters"); };
   $("#f-add").onclick = () => filterDialog($("#f-acc").value);
   const filters = await api(`/api/accounts/${$("#f-acc").value}/filters`);
-  const ACTION = { move: "移动到", markread: "标记已读", star: "加星标", trash: "移入回收站", discard: "直接丢弃" };
+  const ACTION = { move: "移动到", move_account: "移动到邮箱", markread: "标记已读", star: "加星标", trash: "移入回收站", discard: "直接丢弃" };
   const FIELD = { from: "发件人", to: "收件人", subject: "主题", body: "内容", any: "任意字段" };
   const OP = { contains: "包含", equals: "等于", starts: "开头是", ends: "结尾是", regex: "正则匹配" };
   $("#f-tbl").innerHTML = `
@@ -700,6 +703,7 @@ async function resetFlow() {
 }
 
 function filterDialog(accID, existing) {
+  const localsPromise = loadAccounts().then((as) => as.filter((a) => a.kind === "local"));
   const html = `
   <div class="field"><label>规则名称</label><input id="r-name" value="${esc(existing?.name || "")}"></div>
   <div class="row3">
@@ -713,10 +717,11 @@ function filterDialog(accID, existing) {
   </div>
   <div class="row2">
     <div class="field"><label>动作</label><select id="r-action">
-      ${["move:移动到文件夹", "markread:标记已读", "star:加星标", "trash:移入回收站", "discard:直接丢弃"].map((x) => { const [v, l] = x.split(":"); return `<option value="${v}" ${existing?.action === v ? "selected" : ""}>${l}</option>`; }).join("")}
+      ${["move:移动到文件夹", "move_account:移动到邮箱(跨账号)", "markread:标记已读", "star:加星标", "trash:移入回收站", "discard:直接丢弃"].map((x) => { const [v, l] = x.split(":"); return `<option value="${v}" ${existing?.action === v ? "selected" : ""}>${l}</option>`; }).join("")}
     </select></div>
-    <div class="field"><label>目标文件夹 (动作=移动时)</label><input id="r-arg" value="${esc(existing?.action_arg || "")}" placeholder="如 Newsletter"></div>
+    <div class="field"><label>目标（文件夹名 或 本地邮箱地址）</label><input id="r-arg" value="${esc(existing?.action_arg || "")}" placeholder="Newsletter 或 bob@example.com"></div>
   </div>
+  <div class="hint muted mb">例：远程拉取的邮件里「收件人 包含 @partner.example」→ 动作「移动到邮箱」→ 填本地邮箱地址，邮件将自动进入该邮箱的收件箱。</div>
   <div class="field"><label>启用</label><label class="switch"><input type="checkbox" id="r-en" ${!existing || existing.enabled ? "checked" : ""}><span class="track"></span></label></div>`;
   openDialog(existing ? "编辑规则" : "新建规则", html, async () => {
     const body = {
@@ -724,6 +729,12 @@ function filterDialog(accID, existing) {
       cond_value: $("#r-val").value, action: $("#r-action").value, action_arg: $("#r-arg").value, enabled: $("#r-en").checked,
     };
     if (!body.name || !body.cond_value) { toast("名称与匹配值必填"); return false; }
+    if (body.action === "move_account") {
+      const locals = await localsPromise;
+      if (!locals.some((a) => a.address.toLowerCase() === body.action_arg.trim().toLowerCase())) {
+        toast("「移动到邮箱」需要填写已存在的本地邮箱地址"); return false;
+      }
+    }
     try {
       if (existing) await api(`/api/filters/${accID}/${existing.id}`, { method: "PUT", body });
       else await api(`/api/accounts/${accID}/filters`, { method: "POST", body });
@@ -897,6 +908,7 @@ function renderMailShell(fromAdmin = false) {
         </div>
         <button class="icon-btn" id="m-refresh" title="刷新">${I.refresh}</button>
         <button class="icon-btn" id="m-theme" title="切换亮暗色">${I.dark}</button>
+        <button class="icon-btn" id="m-sched" title="定时箱（延时发送）">${I.queue}</button>
         <button class="btn filled small" id="m-compose">${I.edit} 写邮件</button>
       </div>
       <div class="mail-layout">
@@ -910,6 +922,7 @@ function renderMailShell(fromAdmin = false) {
       fromAdmin ? renderConsole("mail") : renderLogin();
     };
     $("#m-theme").onclick = themeToggle;
+    $("#m-sched").onclick = scheduledDialog;
     $("#m-refresh").onclick = refreshFolders;
     $("#m-compose").onclick = composeDialog;
     $("#m-search").addEventListener("keydown", (e) => {
@@ -1065,20 +1078,70 @@ function renderMailShell(fromAdmin = false) {
   }
   function composeDialog() {
     const cfgDomain = acc.address.split("@")[1];
-    openDialog("写邮件", `
+    const atts = []; // {filename, content(b64)}
+    const html = `
       <div class="field"><label>收件人</label><input id="c-to" placeholder="name@example.com, 多个用逗号分隔"></div>
       <div class="field"><label>抄送</label><input id="c-cc"></div>
       <div class="field"><label>主题</label><input id="c-subj"></div>
-      <div class="field"><label>正文</label><textarea id="c-body" style="min-height:180px"></textarea></div>
-      <div class="muted">外部收件人通过 ${cfgDomain ? "SMTP 队列" : "SMTP"} 投递（直投 MX 或中继）；同域名收件人即时送达。</div>`,
-      async () => {
-        try {
-          await api("/api/mail/compose", { method: "POST", body: {
-            to: $("#c-to").value, cc: $("#c-cc").value, subject: $("#c-subj").value, body: $("#c-body").value,
-          } });
-          toast("已发送"); refreshFolders();
-        } catch (e) { toast(e.message); return false; }
-      }, "发送");
+      <div class="field"><label>正文</label><textarea id="c-body" style="min-height:160px"></textarea></div>
+      <div class="field"><label>附件</label><input type="file" id="c-att" multiple style="font-size:13px"><div id="c-att-list" class="muted" style="font-size:12px;margin-top:6px"></div></div>
+      <div class="row2">
+        <div class="field"><label>延时发送（分钟，0=立即）</label><input type="number" id="c-delay" value="0" min="0"></div>
+        <div class="field"><label>&nbsp;</label><span class="muted" style="font-size:12px">延时期内可在「定时箱」撤回</span></div>
+      </div>
+      ${acc.signature ? `<div class="muted" style="font-size:12px">${I.info} 已启用签名（可在账号编辑中修改）</div>` : ""}
+      <div class="muted">外部收件人通过 ${cfgDomain ? "SMTP 队列" : "SMTP"} 投递（直投 MX 或中继）；同域名收件人即时送达。</div>`;
+    openDialog("写邮件", html, async () => {
+      const delay = parseInt($("#c-delay").value) || 0;
+      try {
+        const res = await api("/api/mail/compose", { method: "POST", body: {
+          to: $("#c-to").value, cc: $("#c-cc").value, subject: $("#c-subj").value, body: $("#c-body").value,
+          attachments: atts, delay_min: delay,
+        } });
+        toast(res.scheduled ? "已定时，可在「定时箱」撤回" : "已发送");
+        refreshFolders();
+      } catch (e) { toast(e.message); return false; }
+    }, "发送");
+    // Wire attachments after the dialog is in the DOM.
+    $("#c-att").onchange = () => {
+      const files = Array.from($("#c-att").files || []);
+      let pending = files.length;
+      if (!pending) { atts.length = 0; $("#c-att-list").textContent = ""; return; }
+      atts.length = 0;
+      files.forEach((f) => {
+        if (f.size > 20 * 1048576) { toast(`${f.name} 超过 20MB`); pending--; return; }
+        const fr = new FileReader();
+        fr.onload = () => {
+          atts.push({ filename: f.name, content: String(fr.result).split(",")[1] || "" });
+          if (--pending === 0) $("#c-att-list").textContent = atts.map((a) => a.filename).join("、");
+        };
+        fr.readAsDataURL(f);
+      });
+    };
+  }
+
+  // Pending delayed sends with cancel (撤回).
+  async function scheduledDialog() {
+    const draw = async () => {
+      const list = await api("/api/mail/scheduled");
+      const rows = list.map((m) => `<tr>
+        <td>${esc(m.subject || "(无主题)")}</td>
+        <td class="muted">${esc(m.recipients.join(", "))}</td>
+        <td>${new Date(m.send_at * 1000).toLocaleString("zh-CN")}</td>
+        <td><button class="btn small text" data-cancel="${m.id}" style="color:var(--md-error)">撤回</button></td>
+      </tr>`).join("");
+      openDialog(`${I.queue} 定时箱（延时发送）`, `
+        <table class="tbl"><thead><tr><th>主题</th><th>收件人</th><th>发送时间</th><th></th></tr></thead>
+        <tbody>${rows || `<tr><td colspan="4" class="muted">暂无定时邮件</td></tr>`}</tbody></table>`,
+        () => {}, "关闭");
+      document.querySelectorAll("#dlg-body [data-cancel]").forEach((b) => {
+        b.onclick = async () => {
+          try { await api(`/api/mail/scheduled/${b.dataset.cancel}`, { method: "DELETE" }); toast("已撤回，邮件不会发送"); $("#dlg").close(); scheduledDialog(); }
+          catch (e) { toast(e.message); }
+        };
+      });
+    };
+    await draw();
   }
 }
 

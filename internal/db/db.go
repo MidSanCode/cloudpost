@@ -150,10 +150,21 @@ CREATE TABLE IF NOT EXISTS api_tokens (
 	revoked INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS idx_api_tokens_account ON api_tokens(account_id);
+CREATE TABLE IF NOT EXISTS scheduled (
+	id INTEGER PRIMARY KEY AUTOINCREMENT,
+	account_id INTEGER NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+	from_addr TEXT NOT NULL,
+	recipients TEXT NOT NULL,
+	subject TEXT NOT NULL DEFAULT '',
+	data_path TEXT NOT NULL,
+	send_at INTEGER NOT NULL,
+	created_at INTEGER NOT NULL
+);
 `
 	_, err := d.Exec(schema)
 	// Tolerate upgrades from older DBs (column added later).
 	_, _ = d.Exec(`ALTER TABLE accounts ADD COLUMN remote_target TEXT DEFAULT ''`)
+	_, _ = d.Exec(`ALTER TABLE accounts ADD COLUMN signature TEXT DEFAULT ''`)
 	return err
 }
 
@@ -161,7 +172,7 @@ CREATE INDEX IF NOT EXISTS idx_api_tokens_account ON api_tokens(account_id);
 // the factory-reset flow; the schema itself is reused for the next install.
 func Reset(d *sql.DB) error {
 	tables := []string{
-		"messages", "folders", "filters", "send_queue", "remote_state", "api_tokens",
+		"messages", "folders", "filters", "send_queue", "remote_state", "api_tokens", "scheduled",
 		"accounts", "sessions", "users", "settings",
 	}
 	for _, t := range tables {

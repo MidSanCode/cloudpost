@@ -44,6 +44,14 @@ func (e *Engine) Apply(accountID, msgID int64, folderID int64, subject, from, to
 			if f.ActionArg != "" {
 				_ = e.Store.MoveToFolderName(accountID, msgID, f.ActionArg)
 			}
+		case "move_account":
+			// Auto-move: deliver the message into another LOCAL mailbox's
+			// INBOX and remove it here. Typical use: remote-fetched mail
+			// matching a condition (e.g. To contains @partner.example)
+			// lands in a dedicated local mailbox.
+			if f.ActionArg != "" {
+				e.moveAccount(accountID, msgID, f.ActionArg)
+			}
 		case "markread":
 			_ = e.Store.SetFlags(accountID, []int64{msgID}, "add", []string{`\Seen`})
 		case "star":
@@ -56,6 +64,27 @@ func (e *Engine) Apply(accountID, msgID int64, folderID int64, subject, from, to
 		// First matching rule wins.
 		return
 	}
+}
+
+// moveAccount copies the raw message into the target local account's INBOX
+// and deletes the original. Failures keep the message where it is.
+func (e *Engine) moveAccount(accountID, msgID int64, targetAddr string) {
+	t, err := e.Store.GetAccountByAddressAny(strings.ToLower(strings.TrimSpace(targetAddr)))
+	if err != nil {
+		return
+	}
+	inbox, err := e.Store.FolderByName(t.ID, "INBOX")
+	if err != nil {
+		return
+	}
+	raw, _, err := e.Store.GetMessageRaw(accountID, msgID)
+	if err != nil {
+		return
+	}
+	if _, _, err := e.Store.Deliver(t.ID, inbox.ID, raw, nil); err != nil {
+		return
+	}
+	_ = e.Store.DeleteMessages(accountID, []int64{msgID})
 }
 
 func match(op, value, hay string) bool {

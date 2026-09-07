@@ -15,6 +15,7 @@ import (
 	"sync"
 	"time"
 
+	"cloudpost/internal/mailstore"
 	"cloudpost/internal/state"
 )
 
@@ -22,6 +23,8 @@ import (
 type Deps struct {
 	DB    *sql.DB
 	State *state.State
+	// Store enables delayed-send dispatching (may be nil in tests).
+	Store *mailstore.Store
 }
 
 // QueueItem is one outbound message in the retry queue.

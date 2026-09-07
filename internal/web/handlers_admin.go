@@ -380,6 +380,7 @@ type accountReq struct {
 	Address           string `json:"address"`
 	DisplayName       string `json:"display_name"`
 	Password          string `json:"password"`
+	Signature         string `json:"signature"`
 	RemoteProto       string `json:"remote_proto"`
 	RemoteHost        string `json:"remote_host"`
 	RemotePort        int    `json:"remote_port"`
@@ -447,6 +448,9 @@ func (s *Server) adminUpdateAccount(w http.ResponseWriter, r *http.Request, id i
 		acc.Address = req.Address
 	}
 	acc.DisplayName = req.DisplayName
+	if acc.Kind == "local" {
+		acc.Signature = req.Signature // signature applies to composed mail
+	}
 	if acc.Kind == "remote" {
 		acc.RemoteProto = orStr(req.RemoteProto, acc.RemoteProto)
 		acc.RemoteHost = orStr(req.RemoteHost, acc.RemoteHost)

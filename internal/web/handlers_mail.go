@@ -26,6 +26,19 @@ func (s *Server) handleMail(w http.ResponseWriter, r *http.Request) {
 		s.mailFolders(w, acc)
 	case p == "/compose" && m == http.MethodPost:
 		s.mailCompose(w, r, acc)
+	case p == "/scheduled" && m == http.MethodGet:
+		s.mailListScheduled(w, acc)
+	case strings.HasPrefix(p, "/scheduled/") && m == http.MethodDelete:
+		id, err := strconv.ParseInt(strings.TrimPrefix(p, "/scheduled/"), 10, 64)
+		if err != nil {
+			writeErr(w, 400, "bad id")
+			return
+		}
+		if err := s.deps.Store.CancelScheduled(acc.ID, id); err != nil {
+			writeErr(w, 404, "no such scheduled message")
+			return
+		}
+		writeJSON(w, 200, map[string]any{"ok": true})
 	case strings.HasPrefix(p, "/folders/"):
 		segs := strings.Split(strings.TrimPrefix(p, "/folders/"), "/")
 		folderID, err := strconv.ParseInt(segs[0], 10, 64)
@@ -44,6 +57,8 @@ func (s *Server) handleMail(w http.ResponseWriter, r *http.Request) {
 			s.handleMailAttachment(w, r, acc, folderID, strings.Join(segs[2:], "/"))
 		case len(segs) == 5 && segs[1] == "messages" && segs[3] == "cid":
 			s.handleMailCID(w, r, acc, folderID, strings.Join(segs[2:], "/"))
+		case len(segs) == 4 && segs[1] == "messages" && segs[3] == "raw":
+			s.mailMessage(w, r, acc, folderID, segs[2]+"/raw", m)
 		case len(segs) == 3 && segs[1] == "messages":
 			s.mailMessage(w, r, acc, folderID, segs[2], m)
 		case len(segs) == 2 && segs[1] == "expunge" && m == http.MethodPost:
@@ -222,6 +237,19 @@ func (s *Server) mailMessage(w http.ResponseWriter, r *http.Request, acc *mailst
 		resp["attachments"] = info.Attachments
 	}
 	writeJSON(w, 200, resp)
+}
+
+// mailListScheduled lists this account's pending delayed sends.
+func (s *Server) mailListScheduled(w http.ResponseWriter, acc *mailstore.Account) {
+	list, err := s.deps.Store.ListScheduled(acc.ID)
+	if err != nil {
+		writeErr(w, 500, err.Error())
+		return
+	}
+	if list == nil {
+		list = []*mailstore.ScheduledMessage{}
+	}
+	writeJSON(w, 200, list)
 }
 
 // handleMailAttachment serves one attachment with a hard Content-Disposition
