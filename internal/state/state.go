@@ -31,12 +31,27 @@ type Config struct {
 	RelayUser   string `json:"relay_user"`
 	RelayPass   string `json:"relay_pass"`
 
+	// RelayRoutes routes outbound mail by recipient domain. First match
+	// wins; a route with an empty Host means "send direct (MX)" and thus
+	// overrides the global relay. Unmatched domains fall back to the
+	// global relay (or direct when none is set).
+	RelayRoutes []RelayRoute `json:"relay_routes,omitempty"`
+
 	// DKIM signing for outbound mail (applies to the primary domain only).
 	// DKIMKeyPEM holds the RSA private key in PEM (PKCS#1 or PKCS#8); the
 	// public half is published as a DNS TXT record <selector>._domainkey.<domain>.
 	DKIMEnabled  bool   `json:"dkim_enabled"`
 	DKIMSelector string `json:"dkim_selector"`
 	DKIMKeyPEM   string `json:"dkim_key_pem,omitempty"`
+}
+
+// RelayRoute is one outbound routing rule.
+type RelayRoute struct {
+	Domain string `json:"domain"` // recipient domain (or parent domain: matches subdomains)
+	Host   string `json:"host"`   // smarthost; empty = send direct (MX)
+	Port   int    `json:"port"`   // defaults to 587 when Host is set
+	User   string `json:"user,omitempty"`
+	Pass   string `json:"pass,omitempty"`
 }
 
 // State is the process-wide runtime state.

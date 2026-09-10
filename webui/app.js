@@ -828,7 +828,11 @@ async function viewSettings(el) {
       <div class="field"><label>用户名</label><input id="st-ruser" value="${esc(s.relay_user)}"></div>
       <div class="field"><label>密码</label><input type="password" id="st-rpass" value="${esc(s.relay_pass)}"></div>
     </div>
-    <button class="btn filled" id="st-save">保存设置</button>
+    <h3 class="mt">发件路由（按收件域名分流）</h3>
+    <div class="muted mb">按收件域名选择投递方式：填中继 = 走指定中继（如 outlook.com 走中继）；中继留空 = 直投对方 MX（优先于上面的全局中继）。未匹配的域名走全局中继/直投。首个命中的路由生效。</div>
+    <div id="route-rows"></div>
+    <button class="btn tonal small mt" id="route-add">${I.add} 添加路由</button>
+    <button class="btn filled mt" id="st-save">保存设置</button>
   </div>
   <div class="card mt" style="max-width:760px">
     <h3>DKIM 签名（外发邮件防伪造）</h3>
@@ -849,6 +853,24 @@ async function viewSettings(el) {
   </div>`;
   $("#st-reset").onclick = resetFlow;
   drawDKIM();
+  // Relay routes editor.
+  const routeRow = (r = {}) => {
+    const div = document.createElement("div");
+    div.className = "route-row row2 mt";
+    div.style.alignItems = "end";
+    div.innerHTML = `
+      <div class="field"><label>收件域名</label><input class="rt-domain" value="${esc(r.domain || "")}" placeholder="outlook.com"></div>
+      <div class="field"><label>中继主机（留空=直投 MX）</label><input class="rt-host" value="${esc(r.host || "")}" placeholder="smtp relay 或留空"></div>
+      <div class="field"><label>端口</label><input type="number" class="rt-port" value="${r.port || 587}"></div>
+      <div class="field"><label>用户名</label><input class="rt-user" value="${esc(r.user || "")}"></div>
+      <div class="field"><label>密码</label><input type="password" class="rt-pass" value="${esc(r.pass || "")}"></div>
+      <button class="btn small text" style="color:var(--md-error)">删除</button>`;
+    div.querySelector("button").onclick = () => div.remove();
+    return div;
+  };
+  const rowsBox = $("#route-rows");
+  (s.relay_routes || []).forEach((r) => rowsBox.appendChild(routeRow(r)));
+  $("#route-add").onclick = () => rowsBox.appendChild(routeRow());
   $("#st-ports-save").onclick = async () => {
     const ports = {};
     for (const [id, key] of [["st-web", "web_port"], ["st-smtp", "smtp_port"], ["st-pop3", "pop3_port"], ["st-imap", "imap_port"]]) {
@@ -876,10 +898,21 @@ async function viewSettings(el) {
   };
   $("#st-save").onclick = async () => {
     try {
+      const routes = [];
+      document.querySelectorAll("#route-rows .route-row").forEach((row) => {
+        routes.push({
+          domain: row.querySelector(".rt-domain").value,
+          host: row.querySelector(".rt-host").value,
+          port: parseInt(row.querySelector(".rt-port").value) || 0,
+          user: row.querySelector(".rt-user").value,
+          pass: row.querySelector(".rt-pass").value,
+        });
+      });
       await api("/api/settings", { method: "POST", body: {
         primary_domain: $("#st-domain").value, hostname: $("#st-host").value,
         relay_host: $("#st-relay").value, relay_port: parseInt($("#st-rport").value) || 0,
         relay_user: $("#st-ruser").value, relay_pass: $("#st-rpass").value,
+        relay_routes: routes,
       } });
       toast("已保存");
     } catch (e) { toast(e.message); }

@@ -138,9 +138,17 @@ func (s *Sender) deliver(it *QueueItem) {
 			continue
 		}
 		var err error
-		if cfg != nil && cfg.RelayHost != "" {
+		switch r := resolveRoute(cfg, host); {
+		case r != nil && r.Host != "":
+			// Domain route: dedicated smarthost.
+			err = sendViaRoute(r, it.From, rcpt, raw)
+		case r != nil:
+			// Domain route with empty host: explicit direct delivery,
+			// overriding the global relay.
+			err = sendDirect(it.From, rcpt, raw)
+		case cfg != nil && cfg.RelayHost != "":
 			err = sendViaRelay(cfg, it.From, rcpt, raw)
-		} else {
+		default:
 			err = sendDirect(it.From, rcpt, raw)
 		}
 		if err != nil {
@@ -184,6 +192,25 @@ func rcptHost(addr string) string {
 	return addr[i+1:]
 }
 
+// resolveRoute finds the first routing rule matching the recipient domain
+// (exact or parent-domain match, case-insensitive).
+func resolveRoute(cfg *state.Config, domain string) *state.RelayRoute {
+	if cfg == nil || len(cfg.RelayRoutes) == 0 {
+		return nil
+	}
+	domain = strings.ToLower(strings.TrimSuffix(domain, "."))
+	for i := range cfg.RelayRoutes {
+		rd := strings.ToLower(strings.TrimSpace(cfg.RelayRoutes[i].Domain))
+		if rd == "" {
+			continue
+		}
+		if domain == rd || strings.HasSuffix(domain, "."+rd) {
+			return &cfg.RelayRoutes[i]
+		}
+	}
+	return nil
+}
+
 // sendDirect delivers straight to the recipient MX host.
 func sendDirect(from, rcpt string, raw []byte) error {
 	host := rcptHost(rcpt)
@@ -207,8 +234,21 @@ func sendViaRelay(cfg *state.Config, from, rcpt string, raw []byte) error {
 	addr := fmt.Sprintf("%s:%d", cfg.RelayHost, cfg.RelayPort)
 	var auth smtp.Auth
 	if cfg.RelayUser != "" {
-		host := cfg.RelayHost
-		auth = smtp.PlainAuth("", cfg.RelayUser, cfg.RelayPass, host)
+		auth = smtp.PlainAuth("", cfg.RelayUser, cfg.RelayPass, cfg.RelayHost)
+	}
+	return smtpSendAuth(addr, from, []string{rcpt}, raw, auth, true)
+}
+
+// sendViaRoute delivers through a per-domain routing rule's smarthost.
+func sendViaRoute(r *state.RelayRoute, from, rcpt string, raw []byte) error {
+	port := r.Port
+	if port == 0 {
+		port = 587
+	}
+	addr := fmt.Sprintf("%s:%d", r.Host, port)
+	var auth smtp.Auth
+	if r.User != "" {
+		auth = smtp.PlainAuth("", r.User, r.Pass, r.Host)
 	}
 	return smtpSendAuth(addr, from, []string{rcpt}, raw, auth, true)
 }

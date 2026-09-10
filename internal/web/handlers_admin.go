@@ -751,6 +751,7 @@ func (s *Server) adminGetSettings(w http.ResponseWriter, r *http.Request) {
 		"relay_port":     cfg.RelayPort,
 		"relay_user":     cfg.RelayUser,
 		"relay_pass":     cfg.RelayPass,
+		"relay_routes":   cfg.RelayRoutes,
 	}
 	if s.deps.Ports != nil {
 		wp, sp, pp, ip := s.deps.Ports.CurrentPorts()
@@ -760,6 +761,41 @@ func (s *Server) adminGetSettings(w http.ResponseWriter, r *http.Request) {
 		out["effective_imap_port"] = ip
 	}
 	writeJSON(w, 200, out)
+}
+
+// normalizeRelayRoutes validates and defaults an incoming routes list.
+func normalizeRelayRoutes(raw []any) ([]state.RelayRoute, error) {
+	out := make([]state.RelayRoute, 0, len(raw))
+	for _, item := range raw {
+		m, ok := item.(map[string]any)
+		if !ok {
+			return nil, fmt.Errorf("bad route entry")
+		}
+		r := state.RelayRoute{
+			Domain: strings.ToLower(strings.TrimSpace(str(m["domain"]))),
+			Host:   strings.TrimSpace(str(m["host"])),
+			User:   str(m["user"]),
+			Pass:   str(m["pass"]),
+		}
+		if v, ok := m["port"].(float64); ok {
+			r.Port = int(v)
+		}
+		if r.Domain == "" {
+			return nil, fmt.Errorf("route domain required")
+		}
+		if r.Host != "" && (r.Port < 0 || r.Port > 65535) {
+			return nil, fmt.Errorf("route %s: bad port", r.Domain)
+		}
+		out = append(out, r)
+	}
+	return out, nil
+}
+
+func str(v any) string {
+	if s, ok := v.(string); ok {
+		return s
+	}
+	return ""
 }
 
 func validPort(p int) bool { return p > 0 && p <= 65535 }
@@ -803,6 +839,14 @@ func (s *Server) adminUpdateSettings(w http.ResponseWriter, r *http.Request) {
 	}
 	if v, ok := req["relay_pass"].(string); ok {
 		cfg.RelayPass = v
+	}
+	if raw, ok := req["relay_routes"].([]any); ok {
+		routes, err := normalizeRelayRoutes(raw)
+		if err != nil {
+			writeErr(w, 400, err.Error())
+			return
+		}
+		cfg.RelayRoutes = routes
 	}
 
 	// Port changes: validate first, persist, then rebind listeners live.
